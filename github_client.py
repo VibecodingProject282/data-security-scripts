@@ -13,7 +13,7 @@ import re
 import os
 import zipfile
 import io
-import tempfile
+import shutil
 from typing import Optional, List, Tuple
 from urllib.parse import urlparse
 from repo_manager import RepoFolderManager
@@ -38,6 +38,10 @@ class GitHubClient:
         self.timeout = timeout
         # read the GitHub token from the token.txt file
         self.github_token = self.read_github_token()
+        
+        # Create cache directory
+        self.cache_dir = os.path.join(os.getcwd(), "downloaded-projects")
+        os.makedirs(self.cache_dir, exist_ok=True)
 
         if self.github_token:
             self.session.headers.update({'Authorization': f'token {self.github_token}'})
@@ -217,44 +221,91 @@ class GitHubClient:
 
     def download_repo_as_zip(self, owner: str, repo: str, branch: str = "main") -> Optional[RepoFolderManager]:
         """
-        Download repository as zip file and extract locally.
-        Returns a RepoFolderManager instance for the extracted repository, or None if failed.
+        Download repository as zip file and extract to cache directory.
+        If already cached, return the cached version.
+        Returns a RepoFolderManager instance for the repository, or None if failed.
         """
+        # Create cache key from owner/repo
+        cache_key = f"{owner}_{repo}_{branch}"
+        cached_path = os.path.join(self.cache_dir, cache_key)
+        
+        # Check if already cached
+        if os.path.exists(cached_path) and os.path.isdir(cached_path):
+            # Find the actual repo folder inside the cache directory
+            subfolders = [f for f in os.listdir(cached_path) if os.path.isdir(os.path.join(cached_path, f))]
+            if subfolders:
+                repo_path = os.path.join(cached_path, subfolders[0])
+                return RepoFolderManager(repo_path, use_cache=True)
+        
+        # Download if not cached
         url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{branch}"
         
         try:
             response = self.session.get(url, stream=True, timeout=self.timeout)
             if response.status_code == 200:
-                # Create temporary directory
-                temp_dir = tempfile.mkdtemp()
+                # Create cache directory for this repo
+                os.makedirs(cached_path, exist_ok=True)
                 
-                # Extract zip to temporary directory
+                # Extract zip to cache directory
                 with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-                    z.extractall(temp_dir)
+                    z.extractall(cached_path)
                 
                 # Find the extracted folder (GitHub creates a folder with format: owner-repo-commit)
-                extracted_folders = [f for f in os.listdir(temp_dir) if os.path.isdir(os.path.join(temp_dir, f))]
+                extracted_folders = [f for f in os.listdir(cached_path) if os.path.isdir(os.path.join(cached_path, f))]
                 if extracted_folders:
-                    repo_path = os.path.join(temp_dir, extracted_folders[0])
-                    return RepoFolderManager(repo_path)
+                    repo_path = os.path.join(cached_path, extracted_folders[0])
+                    return RepoFolderManager(repo_path, use_cache=True)
                     
         except Exception as e:
             print(f"Error downloading repository: {e}")
         
         return None
 
+    def clear_cache(self):
+        """Clear the downloaded-projects cache directory"""
+        if os.path.exists(self.cache_dir):
+            shutil.rmtree(self.cache_dir)
+            os.makedirs(self.cache_dir, exist_ok=True)
+
+    def get_cache_size(self) -> str:
+        """Get human-readable cache directory size"""
+        if not os.path.exists(self.cache_dir):
+            return "0 B"
+        
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(self.cache_dir):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                total_size += os.path.getsize(filepath)
+        
+        # Convert to human readable format
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if total_size < 1024.0:
+                return f"{total_size:.1f} {unit}"
+            total_size /= 1024.0
+        return f"{total_size:.1f} TB"
+
     def get_base44_client_for_repo(self, owner: str, repo: str, token: str = "", timeout: int = 30):
         """
         Given a GitHub owner and repo, returns a Base44App client with the project_id found in base44Client.js.
-        Downloads repo locally to avoid API rate limits.
+        Uses cached repository to avoid API rate limits.
         """
         from base44_client import Base44App
-        base44_client_js = self.get_file_content_recursive(owner, repo, "src/api/base44Client.js")
-        if base44_client_js:
-            # Try to extract project_id from appId: "..."
-            import re
-            match = re.search(r'appId:\s*"([^"]+)"', base44_client_js)
-            if match:
-                project_id = match.group(1)
-                return Base44App(project_id, bearer_token=token, timeout=timeout)
+        
+        with self.download_repo_as_zip(owner, repo) as repo_manager:
+            if not repo_manager:
+                return None
+                
+            # Find base44Client.js file
+            base44_file = repo_manager.find_file_by_name("base44Client.js")
+            if base44_file:
+                content = repo_manager.read_file(base44_file)
+                if content:
+                    # Try to extract project_id from appId: "..."
+                    import re
+                    match = re.search(r'appId:\s*"([^"]+)"', content)
+                    if match:
+                        project_id = match.group(1)
+                        return Base44App(project_id, bearer_token=token, timeout=timeout)
+            
         return None

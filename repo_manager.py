@@ -20,15 +20,18 @@ class RepoFolderManager:
     including file searching, reading, and cleanup operations.
     """
     
-    def __init__(self, repo_path: str):
+    def __init__(self, repo_path: str, use_cache: bool = False):
         """
         Initialize RepoFolderManager
         
         Args:
             repo_path: Path to the extracted repository folder
+            use_cache: Whether this is a cached directory (don't clean up)
         """
         self.repo_path = repo_path
-        self.temp_dir = os.path.dirname(repo_path) if repo_path else None
+        self.use_cache = use_cache
+        # Only set temp_dir for cleanup if not using cache
+        self.temp_dir = None if use_cache else (os.path.dirname(repo_path) if repo_path else None)
     
     def read_file(self, file_path: str) -> Optional[str]:
         """Read content from a local file"""
@@ -96,8 +99,8 @@ class RepoFolderManager:
         return files
 
     def cleanup(self):
-        """Clean up temporary directory"""
-        if self.temp_dir and os.path.exists(self.temp_dir):
+        """Clean up temporary directory (only if not using cache)"""
+        if not self.use_cache and self.temp_dir and os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def __enter__(self):

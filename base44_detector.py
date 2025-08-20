@@ -32,79 +32,65 @@ class Base44Detector:
         indicators = {}
         
         # Download repository locally using context manager
+        # Initialize all indicators to False
+        indicators = {
+            'has_base44_sdk': False,
+            'has_base44_app_name': False,
+            'has_base44_client': False,
+            'has_base44_readme': False,
+            'has_base44_logo': False,
+            'has_base44_title': False
+        }
+
         with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
             if not repo_manager:
                 return {'error': 'Could not download repository'}
-        
+
+            # Helper to read file content safely
+            def get_file_content(filename):
+                file = repo_manager.find_file_by_name(filename)
+                return repo_manager.read_file(file) if file else None
+
             # 1. Check package.json for @base44/sdk and name
-            package_file = repo_manager.find_file_by_name("package.json")
-            if package_file:
-                content = repo_manager.read_file(package_file)
-                if content:
-                    try:
-                        pkg_data = json.loads(content)
-                        dependencies = pkg_data.get('dependencies', {})
-                        indicators['has_base44_sdk'] = '@base44/sdk' in dependencies
-                        indicators['has_base44_app_name'] = pkg_data.get('name') == 'base44-app'
-                    except json.JSONDecodeError:
-                        indicators['has_base44_sdk'] = False
-                        indicators['has_base44_app_name'] = False
-                else:
-                    indicators['has_base44_sdk'] = False
-                    indicators['has_base44_app_name'] = False
-            else:
-                indicators['has_base44_sdk'] = False
-                indicators['has_base44_app_name'] = False
-            
+            content = get_file_content("package.json")
+            if content:
+                try:
+                    pkg_data = json.loads(content)
+                    dependencies = pkg_data.get('dependencies', {})
+                    indicators['has_base44_sdk'] = '@base44/sdk' in dependencies
+                    indicators['has_base44_app_name'] = pkg_data.get('name') == 'base44-app'
+                except json.JSONDecodeError:
+                    pass
+
             # 2. Check base44Client.js
-            base44_file = repo_manager.find_file_by_name("base44Client.js")
-            if base44_file:
-                content = repo_manager.read_file(base44_file)
-                if content:
-                    indicators['has_base44_client'] = (
-                        '@base44/sdk' in content and 
-                        'createClient' in content and
-                        'appId' in content
-                    )
-                    try:
-                        self.project_id = content.split('appId: "')[1].split('"')[0]
-                    except:
-                        self.project_id = None
-                else:
-                    indicators['has_base44_client'] = False
-                    self.project_id = None
-            else:
-                indicators['has_base44_client'] = False
+            content = get_file_content("base44Client.js")
+            if content:
+                indicators['has_base44_client'] = (
+                    '@base44/sdk' in content and 
+                    'createClient' in content and
+                    'appId' in content
+                )
+            try:
+                self.project_id = content.split('appId: "')[1].split('"')[0]
+            except Exception:
                 self.project_id = None
-            
+            else:
+                self.project_id = None
+
             # 3. Check README.md
-            readme_file = repo_manager.find_file_by_name("README.md")
-            if readme_file:
-                content = repo_manager.read_file(readme_file)
-                if content:
-                    indicators['has_base44_readme'] = (
-                        'This app was created automatically by Base44' in content and
-                        'app@base44.com' in content
+            content = get_file_content("README.md")
+            if content:
+                indicators['has_base44_readme'] = (
+                    'This app was created automatically by Base44' in content and
+                    'app@base44.com' in content
                     )
-                else:
-                    indicators['has_base44_readme'] = False
-            else:
-                indicators['has_base44_readme'] = False
-            
+
             # 4. Check index.html
-            index_file = repo_manager.find_file_by_name("index.html")
-            if index_file:
-                content = repo_manager.read_file(index_file)
-                if content:
-                    indicators['has_base44_logo'] = 'https://base44.com/logo_v2.svg' in content
-                    indicators['has_base44_title'] = 'Base44 APP' in content
-                else:
-                    indicators['has_base44_logo'] = False
-                    indicators['has_base44_title'] = False
-            else:
-                indicators['has_base44_logo'] = False
-                indicators['has_base44_title'] = False
-        
+            content = get_file_content("index.html")
+            if content:
+                indicators['has_base44_logo'] = 'https://base44.com/logo_v2.svg' in content
+                indicators['has_base44_title'] = 'Base44 APP' in content
+
         return indicators
     
     def detect_base44_repository(self, repo_url: str) -> Tuple[bool, float, dict]:
