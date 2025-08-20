@@ -28,62 +28,82 @@ class Base44Detector:
         self.project_id = None
     
     def check_base44_indicators(self, owner: str, repo: str) -> dict:
-        """Check for strong Base44 indicators"""
+        """Check for strong Base44 indicators using local file download"""
         indicators = {}
         
-        # 1. Check package.json for @base44/sdk and name
-        package_json = self.github_client.get_file_content_recursive(owner, repo, "package.json")
-        if package_json:
-            try:
-                pkg_data = json.loads(package_json)
-                dependencies = pkg_data.get('dependencies', {})
-                indicators['has_base44_sdk'] = '@base44/sdk' in dependencies
-                indicators['has_base44_app_name'] = pkg_data.get('name') == 'base44-app'
-            except json.JSONDecodeError:
+        # Download repository locally using context manager
+        with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
+            if not repo_manager:
+                return {'error': 'Could not download repository'}
+        
+            # 1. Check package.json for @base44/sdk and name
+            package_file = repo_manager.find_file_by_name("package.json")
+            if package_file:
+                content = repo_manager.read_file(package_file)
+                if content:
+                    try:
+                        pkg_data = json.loads(content)
+                        dependencies = pkg_data.get('dependencies', {})
+                        indicators['has_base44_sdk'] = '@base44/sdk' in dependencies
+                        indicators['has_base44_app_name'] = pkg_data.get('name') == 'base44-app'
+                    except json.JSONDecodeError:
+                        indicators['has_base44_sdk'] = False
+                        indicators['has_base44_app_name'] = False
+                else:
+                    indicators['has_base44_sdk'] = False
+                    indicators['has_base44_app_name'] = False
+            else:
                 indicators['has_base44_sdk'] = False
                 indicators['has_base44_app_name'] = False
-        else:
-            print(f"No package.json found for {owner}/{repo}")
-            indicators['has_base44_sdk'] = False
-            indicators['has_base44_app_name'] = False
-        
-        # 2. Check base44Client.js
-        base44_client = self.github_client.get_file_content_recursive(owner, repo, "src/api/base44Client.js")
-        if base44_client is None:
-            print(f"No base44Client.js found for {owner}/{repo}")
-            self.project_id = None
-        else:
-            indicators['has_base44_client'] = (
-            '@base44/sdk' in base44_client and 
-            'createClient' in base44_client and
-            'appId' in base44_client
-            )
-            self.project_id = base44_client.split('appId: "')[1].split('"')[0]
-        
-        # 3. Check README.md
-        readme = self.github_client.get_file_content_recursive(owner, repo, "README.md")
-        if readme is None:
-            print(f"No README.md found for {owner}/{repo}")
-            indicators['has_base44_readme'] = False
-        else:
-            indicators['has_base44_readme'] = (
-            'This app was created automatically by Base44' in readme and
-            'app@base44.com' in readme
-        )
-        
-        # 4. Check index.html
-        index_html = self.github_client.get_file_content_recursive(owner, repo, "index.html")
-        if index_html is None:
-            print(f"No index.html found for {owner}/{repo}")
-            indicators['has_base44_logo'] = False
-            indicators['has_base44_title'] = False
-        else:
-            indicators['has_base44_logo'] = (
-            'https://base44.com/logo_v2.svg' in index_html
-            )
-            indicators['has_base44_title'] = (
-                'Base44 APP' in index_html
-            )
+            
+            # 2. Check base44Client.js
+            base44_file = repo_manager.find_file_by_name("base44Client.js")
+            if base44_file:
+                content = repo_manager.read_file(base44_file)
+                if content:
+                    indicators['has_base44_client'] = (
+                        '@base44/sdk' in content and 
+                        'createClient' in content and
+                        'appId' in content
+                    )
+                    try:
+                        self.project_id = content.split('appId: "')[1].split('"')[0]
+                    except:
+                        self.project_id = None
+                else:
+                    indicators['has_base44_client'] = False
+                    self.project_id = None
+            else:
+                indicators['has_base44_client'] = False
+                self.project_id = None
+            
+            # 3. Check README.md
+            readme_file = repo_manager.find_file_by_name("README.md")
+            if readme_file:
+                content = repo_manager.read_file(readme_file)
+                if content:
+                    indicators['has_base44_readme'] = (
+                        'This app was created automatically by Base44' in content and
+                        'app@base44.com' in content
+                    )
+                else:
+                    indicators['has_base44_readme'] = False
+            else:
+                indicators['has_base44_readme'] = False
+            
+            # 4. Check index.html
+            index_file = repo_manager.find_file_by_name("index.html")
+            if index_file:
+                content = repo_manager.read_file(index_file)
+                if content:
+                    indicators['has_base44_logo'] = 'https://base44.com/logo_v2.svg' in content
+                    indicators['has_base44_title'] = 'Base44 APP' in content
+                else:
+                    indicators['has_base44_logo'] = False
+                    indicators['has_base44_title'] = False
+            else:
+                indicators['has_base44_logo'] = False
+                indicators['has_base44_title'] = False
         
         return indicators
     
@@ -96,7 +116,6 @@ class Base44Detector:
         """
         try:
             owner, repo = self.github_client.parse_github_url(repo_url)
-            print(f"Analyzing repository: {owner}/{repo}")
             
             indicators = self.check_base44_indicators(owner, repo)
             
@@ -109,39 +128,20 @@ class Base44Detector:
             return is_base44, confidence, indicators
             
         except Exception as e:
-            print(f"Error analyzing repository: {e}")
             return False, 0.0, {'error': str(e)}
     
     def print_results(self, repo_url: str, is_base44: bool, confidence: float, indicators: dict):
         """Print analysis results"""
-        print(f"\n{'='*50}")
-        print(f"BASE44 REPOSITORY DETECTOR")
-        print(f"{'='*50}")
-        print(f"Repository: {repo_url}")
-        print(f"Result: {'✅ BASE44 PROJECT' if is_base44 else '❌ NOT BASE44'}")
-        print(f"Confidence: {confidence:.1%}")
-        print(f"Project ID: {self.project_id if self.project_id else 'Not found'}")
-        
         if 'error' in indicators:
             print(f"❌ Error: {indicators['error']}")
             return
         
-        print(f"\n🔍 INDICATORS:")
-        indicator_names = {
-            'has_base44_sdk': '@base44/sdk dependency',
-            'has_base44_app_name': 'base44-app package name',
-            'has_base44_client': 'base44Client.js file',
-            'has_base44_readme': 'Base44 README signature',
-            'has_base44_logo': 'Base44 logo in HTML',
-            'has_base44_title': 'Base44 APP title'
-        }
-        
-        for key, found in indicators.items():
-            status = "✅" if found else "❌"
-            name = indicator_names.get(key, key)
-            print(f"  {status} {name}")
-        
-        print(f"{'='*50}")
+        if is_base44:
+            print(f"✅ Base44 project detected (confidence: {confidence:.1%})")
+            if self.project_id:
+                print(f"Project ID: {self.project_id}")
+        else:
+            print(f"❌ Not a Base44 project (confidence: {confidence:.1%})")
 
 
 def main():

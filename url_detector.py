@@ -154,21 +154,21 @@ class URLDetector:
         except Exception as e:
             return f"Unexpected error checking SSL certificate: {str(e)}"
     
-    def scan_file_for_urls(self, owner: str, repo: str, file_path: str) -> List[Dict]:
-        """Scan a single file for URL security issues"""
+    def scan_file_for_urls(self, file_path: str, relative_path: str, repo_manager) -> List[Dict]:
+        """Scan a single local file for URL security issues"""
         url_issues = []
         
-        # Get file content
-        content = self.github_client.get_file_content(owner, repo, file_path)
+        # Get file content from local file
+        content = repo_manager.read_file(file_path)
         if not content:
             return url_issues
         
         # Detect URLs and security issues
-        url_issues.extend(self.detect_urls(content, file_path))
+        url_issues.extend(self.detect_urls(content, relative_path))
         
         # Add file path to each issue
         for issue in url_issues:
-            issue['file'] = file_path
+            issue['file'] = relative_path
         
         return url_issues
     
@@ -177,29 +177,27 @@ class URLDetector:
         try:
             # Parse GitHub URL
             owner, repo = self.github_client.parse_github_url(repo_url)
-            print(f"🔍 Analyzing repository: {owner}/{repo}")
             
-            # Get code files
-            code_files = self.github_client.get_code_files(owner, repo) # remove
-            if not code_files:
-                print("❌ Could not retrieve repository file tree")
-                return []
-            
-            # Scan each file
-            all_issues = []
-            for i, file_path in enumerate(code_files, 1):
-
-                #################################################
-                if file_path != "src/pages/Products.jsx": # Skip specific file for testing, remove this line in production
-                    continue
-
-                print(f"🔍 Scanning ({i}/{len(code_files)}): {file_path}")
+            # Download repository locally using context manager
+            with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
+                if not repo_manager:
+                    return []
                 
-                issues = self.scan_file_for_urls(owner, repo, file_path)
-                all_issues.extend(issues)
-            
-            self.url_issues = all_issues
-            return all_issues
+                # Get code files from local repository
+                code_files = repo_manager.get_code_files()
+                
+                if not code_files:
+                    return []
+                
+                # Scan each file
+                all_issues = []
+                for file_path in code_files:
+                    relative_path = repo_manager.get_relative_path(file_path)     
+                    issues = self.scan_file_for_urls(file_path, relative_path, repo_manager)
+                    all_issues.extend(issues)
+                
+                self.url_issues = all_issues
+                return all_issues
             
         except Exception as e:
             print(f"❌ Error during analysis: {str(e)}")
@@ -207,46 +205,25 @@ class URLDetector:
     
     def print_results(self, repo_url: str, issues: List[Dict]):
         """Print analysis results in a formatted way"""
-        print(f"\n{'='*80}")
-        print(f"🔒 URL SECURITY ANALYSIS RESULTS")
-        print(f"{'='*80}")
-        print(f"Repository: {repo_url}")
-        
         if not issues:
-            print(f"✅ No URL security issues detected!")
-            print(f"🎉 All URLs appear to use secure communication protocols.")
+            print("✅ No URL security issues detected")
         else:
-            print(f"🚨 FOUND {len(issues)} URL SECURITY ISSUES!")
-            print(f"⚠️  SECURITY VULNERABILITIES DETECTED!")
+            print(f"🚨 Found {len(issues)} URL security issues:")
             
-            self.print_issues_group(issues)
-        
-        print(f"{'='*80}")
-    
-    def print_issues_group(self, issues: List[Dict]):
-        """Print a group of issues"""
-        # Group issues by file
-        issues_by_file = {}
-        for issue in issues:
-            file_path = issue['file']
-            if file_path not in issues_by_file:
-                issues_by_file[file_path] = []
-            issues_by_file[file_path].append(issue)
-        
-        # Print results grouped by file
-        for file_path, file_issues in issues_by_file.items():
-            print(f"\n📄 File: {file_path}")
-            print(f"{'-' * 50}")
+            # Group issues by file
+            issues_by_file = {}
+            for issue in issues:
+                file_path = issue['file']
+                if file_path not in issues_by_file:
+                    issues_by_file[file_path] = []
+                issues_by_file[file_path].append(issue)
             
-            for issue in file_issues:
-                print(f"� Type: {issue['type']}")
-                print(f"   URL: {issue['url']}")
-                print(f"   Line: {issue['line']}")
-                print(f"   Issue: {issue['issue']}")
-                print(f"   Context:")
-                for line in issue['context'].split('\n'):
-                    print(f"     {line}")
-                print()
+            # Print results grouped by file
+            for file_path, file_issues in issues_by_file.items():
+                print(f"\n📄 {file_path}:")
+                for issue in file_issues:
+                    print(f"  🔴 {issue['type']}: {issue['url']} (line {issue['line']})")
+                    print(f"     Issue: {issue['issue']}")
 
 
 def main():
@@ -280,11 +257,8 @@ def main():
     
     # Exit with appropriate code
     if issues:
-        print(f"\n🔴 Exiting with code 1 - {len(issues)} security issues found")
         sys.exit(1)
-    else:
-        print(f"\n🟢 Exiting with code 0 - No security issues found")
-        sys.exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

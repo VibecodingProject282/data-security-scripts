@@ -8,22 +8,31 @@ This script analyzes Base44 projects to detect potential insecure password stora
 3. Alerting about tables that might store passwords insecurely
 
 Usage:
-    python password_detector.py --project-id PROJECT_ID --token BEARER_TOKEN
+    python password_detector.py --token BEARER_TOKEN --repo-url GITHUB_REPO_URL
 """
 
 import sys
 import argparse
 from typing import List, Optional, Tuple
 from base44_client import Base44App
+from github_client import GitHubClient
 
 
 class PasswordDetector:
     """Detects potential insecure password storage in Base44 projects"""
     
-    def __init__(self, project_id: str, bearer_token: str):
-        self.project_id = project_id
+    def __init__(self, bearer_token: str, repo_url: str):
         self.bearer_token = bearer_token
-        self.app = Base44App(project_id, bearer_token)
+        self.github_client = GitHubClient()
+        
+        # Extract owner and repo from URL and get Base44 client
+        owner, repo = self.github_client.parse_github_url(repo_url)
+        self.app = self.github_client.get_base44_client_for_repo(owner, repo, bearer_token)
+        
+        if not self.app:
+            raise ValueError(f"Could not find Base44 project ID in repository {repo_url}")
+        
+        self.project_id = self.app.project_id
         
         self.tables_with_passwords = []
     
@@ -48,42 +57,23 @@ class PasswordDetector:
 
     def detect_password_vulnerabilities(self) -> None:
         """Main method to detect password storage vulnerabilities"""
-        print("🔍 Starting password storage vulnerability detection...")
-        
         # Step 1: Get all entities
         entities = self.app.get_base44_entities()
-        print(f"Found {len(entities)} entities, checking for password columns...")
         
         # Step 2: Check each entity for password columns
         for entity in entities:
-            print(f"\nChecking entity: {entity}")
-            
-            if self.app.check_base44_table_has_data(entity): # else, we cant access the table (?)
-                print(f"✅ Table '{entity}' has data")
-                
+            if self.app.check_base44_table_has_data(entity):
                 if self.check_password_columns(entity):
                     self.tables_with_passwords.append(entity)
-                    print(f"🚨 Table '{entity}' contains password columns!")
-                else:
-                    print(f"✅ Table '{entity}' has no password columns")
             else:
                 #self.check_table_no_data(entity)
                 pass
         
         # Step 3: Report findings
         if self.tables_with_passwords:
-            print(f"\n🚨 PASSWORD STORAGE VULNERABILITIES DETECTED!")
-            print(f"⚠️  The following tables contain password columns:")
-            for table in self.tables_with_passwords:
-                print(f"   • {table}")
-            print(f"\n💡 Security Recommendations:")
-            print(f"   - Never store passwords in plain text")
-            print(f"   - Use strong hashing algorithms (bcrypt, Argon2, PBKDF2)")
-            print(f"   - Add salt to password hashes")
-            print(f"   - Consider using a dedicated authentication service")
+            print(f"🚨 Found password storage vulnerabilities in tables: {', '.join(self.tables_with_passwords)}")
         else:
-            print(f"\n✅ No password storage vulnerabilities detected!")
-            print(f"All tables appear to store passwords securely or don't store passwords at all.")
+            print("✅ No password storage vulnerabilities detected")
 
 
 def main():
@@ -93,22 +83,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    parser.add_argument('--project-id', required=True, help='Base44 Project ID')
     parser.add_argument('--token', required=True, help='Bearer token for Base44 API')
+    parser.add_argument('--repo-url', required=True, help='GitHub repository URL')
     
     args = parser.parse_args()
     
     # Create detector and run analysis
-    detector = PasswordDetector(args.project_id, args.token)
+    detector = PasswordDetector(args.token, args.repo_url)
     detector.detect_password_vulnerabilities()
     
     # Exit with appropriate code
     if detector.tables_with_passwords:
-        print(f"\n🔴 Exiting with code 1 - Password vulnerabilities found in tables: {detector.tables_with_passwords}")
         sys.exit(1)
-    else:
-        print(f"\n🟢 Exiting with code 0 - No password vulnerabilities")
-        sys.exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ This script analyzes Base44 projects to detect potential IDOR vulnerabilities by
 3. Alerting about tables that might be vulnerable to IDOR attacks
 
 Usage:
-    python idor_detector.py --project-id PROJECT_ID --token BEARER_TOKEN --repo-url GITHUB_REPO_URL
+    python idor_detector.py --token BEARER_TOKEN --repo-url GITHUB_REPO_URL
 """
 
 import re
@@ -22,11 +22,18 @@ from github_client import GitHubClient
 class IDORDetector:
     """Detects potential IDOR vulnerabilities in Base44 projects"""
     
-    def __init__(self, project_id: str, bearer_token: str):
-        self.project_id = project_id
+    def __init__(self, bearer_token: str, repo_url: str):
         self.bearer_token = bearer_token
-        self.base44_app = Base44App(project_id, bearer_token)
         self.github_client = GitHubClient()
+        
+        # Extract owner and repo from URL and get Base44 client
+        owner, repo = self.github_client.parse_github_url(repo_url)
+        self.base44_app = self.github_client.get_base44_client_for_repo(owner, repo, bearer_token)
+        
+        if not self.base44_app:
+            raise ValueError(f"Could not find Base44 project ID in repository {repo_url}")
+        
+        self.project_id = self.base44_app.project_id
 
         self.postman_tables = []
     
@@ -46,79 +53,63 @@ class IDORDetector:
                     found_tables.append(entity)
         
         return found_tables
-    
-    def check_frontend_references(self, repo_url: str, tables: List[str]) -> List[str]:
+
+    def check_frontend_references(self, repo_url: str, data_tables: List[str], all_tables: List[str]) -> Tuple[List[str], List[str]]:
         """Check which tables are referenced in the frontend code"""
         try:
             owner, repo = self.github_client.parse_github_url(repo_url)
-            print(f"\nAnalyzing GitHub repository: {owner}/{repo}")
             
-            # Get repository tree to find pages directory
-            tree_files = self.github_client.get_repository_tree(owner, repo)
-            
-            if not tree_files:
-                print("❌ Could not access repository tree")
-                return tables
-            pages_files = [file_path for file_path in tree_files if 'pages' in file_path]
-            if not pages_files:
-                print("❌ No pages directory found")
-                return tables
-            
-            print(f"Found {len(pages_files)} files in pages directory: {pages_files}")
-            
-            referenced_tables = set()
-            
-            for file_path in pages_files:
-                if file_path.endswith(('.jsx', '.js', '.tsx', '.ts')):
-                    file_content = self.github_client.get_file_content(owner, repo, file_path)
+            # Download repository locally using context manager
+            with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
+                if not repo_manager:
+                    return [], []
+                
+                # Find all JavaScript/TypeScript files in pages directory
+                pages_files = repo_manager.find_files_in_directory('pages', ['.jsx', '.js', '.tsx', '.ts'])
+                
+                if not pages_files:
+                    return [], []
+                
+                referenced_tables = set()
+                
+                for file_path in pages_files:
+                    file_content = repo_manager.read_file(file_path)
                     if file_content:
-                        found_tables = self.search_tables_in_file(file_content, tables)
+                        found_tables = self.search_tables_in_file(file_content, all_tables)
                         if found_tables:
-                            print(f"📁 {file_path}: Found references to {found_tables}")
+                            relative_path = repo_manager.get_relative_path(file_path)
+                            print(f"📁 {relative_path}: Found references to {found_tables}")
                             referenced_tables.update(found_tables)
-            
-            # Return tables that are NOT referenced in frontend
-            unreferenced_tables = [table for table in tables if table not in referenced_tables]
-            return unreferenced_tables
-            
+                
+                # Return tables that are NOT referenced in frontend
+                high_risk_tables = [table for table in data_tables if table not in referenced_tables]
+                low_risk_tables = [table for table in all_tables if table not in referenced_tables and table not in high_risk_tables]
+                return high_risk_tables, low_risk_tables
+
         except Exception as e:
             print(f"Error checking frontend references: {e}")
-            return tables
+            return [], []
     
     def detect_idor_vulnerabilities(self, repo_url: str) -> bool:
         """Main method to detect IDOR vulnerabilities"""
-        print("🔍 Starting IDOR vulnerability detection...")
-        
         # Step 1: Find tables with data
-        self.postman_tables = self.base44_app.find_tables_with_data()
-        
-        if not self.postman_tables:
-            print("❌ No tables with data found. Cannot proceed with IDOR detection.")
-            return False
+        self.data_tables = self.base44_app.find_tables_with_data()   # high risk if not empty
+        self.all_tables = self.base44_app.get_base44_entities()      # low risk if not empty
 
-        print(f"\n📊 Found {len(self.postman_tables)} tables with data: {self.postman_tables}")
+        if not self.all_tables:
+            return False
         
         # Step 2: Check frontend references
-        unreferenced_tables = self.check_frontend_references(repo_url, self.postman_tables)
+        high_risk_tables, low_risk_tables = self.check_frontend_references(repo_url, self.data_tables, self.all_tables)
         
-        # Step 3: Alert about potential IDOR vulnerabilities
-        if unreferenced_tables:
-            print(f"\n🚨 IDOR ATTACK POSSIBLE!")
-            print(f"⚠️  The following tables have data but are NOT referenced in the frontend:")
-            for table in unreferenced_tables:
-                print(f"   • {table}")
-            print(f"\n💡 These tables might be vulnerable to IDOR attacks as they:")
-            print(f"   - Contain data (accessible via API)")
-            print(f"   - Are not used in the frontend (no access controls visible)")
-            print(f"   - Could be accessed directly via API endpoints")
-        else:
-            print(f"\n✅ No IDOR vulnerabilities detected!")
-            print(f"All tables with data are properly referenced in the frontend code.")
-        
-        # Update postman_tables to only include vulnerable ones
-        self.postman_tables = unreferenced_tables
+        # Step 3: Report IDOR vulnerabilities
+        if high_risk_tables:
+            print(f"🚨 HIGH IDOR risk tables: {', '.join(high_risk_tables)}")
+        if low_risk_tables:
+            print(f"⚠️  LOW IDOR risk tables: {', '.join(low_risk_tables)}")
 
-        return bool(self.postman_tables)
+        # Return True if there are any risk tables
+        return bool(high_risk_tables or low_risk_tables)
 
 
 def main():
@@ -128,23 +119,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    parser.add_argument('--project-id', required=True, help='Base44 Project ID') # remove
-    parser.add_argument('--token', required=True, help='Bearer token for Base44 API') # remove, and one comment
+    parser.add_argument('--token', required=True, help='Bearer token for Base44 API')
     parser.add_argument('--repo-url', required=True, help='GitHub repository URL')
     
     args = parser.parse_args()
     
     # Create detector and run analysis
-    detector = IDORDetector(args.project_id, args.token)
+    detector = IDORDetector(args.token, args.repo_url)
     found = detector.detect_idor_vulnerabilities(args.repo_url)
 
     # Exit with appropriate code
     if found:
-        print(f"\n🔴 Exiting with code 1 - IDOR vulnerabilities found: {detector.postman_tables}")
         sys.exit(1)
-    else:
-        print(f"\n🟢 Exiting with code 0 - No IDOR vulnerabilities")
-        sys.exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

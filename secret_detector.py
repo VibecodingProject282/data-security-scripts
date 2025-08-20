@@ -29,38 +29,6 @@ class SecretDetector:
         self.github_client = GitHubClient(timeout)
         self.secrets_found = []
     
-    # def detect_api_keys(self, content: str, file_path: str) -> List[Dict]:
-    #     """Detect API keys in content"""
-    #     secrets = []
-        
-    #     # Pattern for API keys (high entropy strings)
-    #     api_key_patterns = [
-    #         # API key with common prefixes
-    #         r'["\'](sk_[a-zA-Z0-9]{32,})["\']',  # Stripe
-    #         r'["\'](pk_[a-zA-Z0-9]{32,})["\']',  # Stripe public
-    #         r'["\'](AIza[a-zA-Z0-9]{35})["\']',  # Google API
-    #     ]
-        
-    #     for pattern in api_key_patterns:
-    #         matches = re.finditer(pattern, content)
-    #         for match in matches:
-    #             secret_value = match.group(1)
-                
-    #             # Skip if it's clearly not a secret (common patterns)
-    #             if is_false_positive(secret_value):
-    #                 continue
-                
-    #             line_number = content[:match.start()].count('\n') + 1
-    #             secrets.append({
-    #                 'type': 'API Key',
-    #                 'value': secret_value[:20] + '...' if len(secret_value) > 20 else secret_value,
-    #                 'line': line_number,
-    #                 'pattern': pattern,
-    #                 'context': get_line_context(content, line_number)
-    #             })
-        
-    #     return secrets
-    
     def detect_tokens(self, content: str, file_path: str) -> List[Dict]:
         """Detect various types of tokens"""
         secrets = []
@@ -132,23 +100,22 @@ class SecretDetector:
     
 
     
-    def scan_file_for_secrets(self, owner: str, repo: str, file_path: str) -> List[Dict]:
-        """Scan a single file for secrets"""
+    def scan_file_for_secrets(self, file_path: str, relative_path: str, repo_manager) -> List[Dict]:
+        """Scan a single local file for secrets"""
         secrets = []
         
-        # Get file content
-        content = self.github_client.get_file_content(owner, repo, file_path)
+        # Get file content from local file
+        content = repo_manager.read_file(file_path)
         if not content:
             return secrets
         
         # Detect different types of secrets
-        # secrets.extend(self.detect_api_keys(content, file_path))
-        secrets.extend(self.detect_tokens(content, file_path))
-        secrets.extend(self.detect_environment_variables(content, file_path))
+        secrets.extend(self.detect_tokens(content, relative_path))
+        secrets.extend(self.detect_environment_variables(content, relative_path))
         
         # Add file path to each secret
         for secret in secrets:
-            secret['file'] = file_path
+            secret['file'] = relative_path
         
         return secrets
     
@@ -156,38 +123,30 @@ class SecretDetector:
         """Main method to detect secrets in the repository"""
         try:
             owner, repo = self.github_client.parse_github_url(repo_url)
-            print(f"🔍 Scanning repository: {owner}/{repo}")
             
-            # Get code files
-            code_files = self.github_client.get_code_files(owner, repo)
-            if not code_files:
-                print("❌ Could not retrieve repository file tree")
-                return []
-            
-            print(f"💻 Found {len(code_files)} code files to scan")
-            
-            # Scan each code file
-            all_secrets = []
-            for i, file_path in enumerate(code_files, 1):
-                #########################################################################
-                if file_path != "src/pages/Products.jsx": # Skip specific file for testing, remove this line in production
-                    continue
+            # Download repository locally using context manager
+            with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
+                if not repo_manager:
+                    return []
                 
-                print(f"🔍 Scanning file {i}/{len(code_files)}: {file_path}")
+                # Get ALL files from local repository (not just code files)
+                all_files = repo_manager.find_files()
                 
-                try:
-                    secrets = self.scan_file_for_secrets(owner, repo, file_path)
-                    if secrets:
-                        all_secrets.extend(secrets)
-                        print(f"🚨 Found {len(secrets)} potential secrets in {file_path}")
-                except Exception as e:
-                    print(f"⚠️  Error scanning {file_path}: {e}")
+                if not all_files:
+                    return []
                 
-                # Add small delay to avoid rate limiting
-                import time
-                time.sleep(0.1)
-            
-            return all_secrets
+                # Scan each file
+                all_secrets = []
+                for file_path in all_files:
+                    relative_path = repo_manager.get_relative_path(file_path)
+                    try:
+                        secrets = self.scan_file_for_secrets(file_path, relative_path, repo_manager)
+                        if secrets:
+                            all_secrets.extend(secrets)
+                    except Exception as e:
+                        print(f"⚠️  Error scanning {relative_path}: {e}")
+                
+                return all_secrets
             
         except Exception as e:
             print(f"❌ Error analyzing repository: {e}")
@@ -195,17 +154,10 @@ class SecretDetector:
     
     def print_results(self, repo_url: str, secrets: List[Dict]):
         """Print analysis results"""
-        print(f"\n{'='*60}")
-        print(f"🔐 SECRET DETECTOR RESULTS")
-        print(f"{'='*60}")
-        print(f"Repository: {repo_url}")
-        
         if not secrets:
-            print(f"✅ No hardcoded secrets detected!")
-            print(f"🎉 The codebase appears to be secure from hardcoded secrets.")
+            print("✅ No hardcoded secrets detected")
         else:
-            print(f"🚨 FOUND {len(secrets)} POTENTIAL SECRETS!")
-            print(f"⚠️  CRITICAL SECURITY ISSUE DETECTED!")
+            print(f"🚨 Found {len(secrets)} potential secrets:")
             
             # Group secrets by file
             secrets_by_file = {}
@@ -217,20 +169,9 @@ class SecretDetector:
             
             # Print results grouped by file
             for file_path, file_secrets in secrets_by_file.items():
-                print(f"\n📄 File: {file_path}")
-                print(f"{'-' * 50}")
-                
+                print(f"\n📄 {file_path}:")
                 for secret in file_secrets:
-                    print(f"🔴 Type: {secret['type']}")
-                    print(f"   Value: {secret['value']}")
-                    print(f"   Line: {secret['line']}")
-                    print(f"   Pattern: {secret['pattern']}")
-                    print(f"   Context:")
-                    for line in secret['context'].split('\n'):
-                        print(f"     {line}")
-                    print()
-        
-        print(f"{'='*60}")
+                    print(f"  🔴 {secret['type']}: {secret['value']} (line {secret['line']})")
 
 
 def main():
@@ -259,11 +200,8 @@ def main():
     
     # Exit with appropriate code
     if secrets:
-        print(f"\n🔴 Exiting with code 1 - {len(secrets)} secrets found")
         sys.exit(1)
-    else:
-        print(f"\n🟢 Exiting with code 0 - No secrets found")
-        sys.exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

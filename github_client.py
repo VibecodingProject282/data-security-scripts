@@ -10,8 +10,13 @@ import requests
 import base64
 import time
 import re
+import os
+import zipfile
+import io
+import tempfile
 from typing import Optional, List, Tuple
 from urllib.parse import urlparse
+from repo_manager import RepoFolderManager
 
 
 class GitHubClient:
@@ -209,3 +214,47 @@ class GitHubClient:
             time.sleep(delay)
         
         return results
+
+    def download_repo_as_zip(self, owner: str, repo: str, branch: str = "main") -> Optional[RepoFolderManager]:
+        """
+        Download repository as zip file and extract locally.
+        Returns a RepoFolderManager instance for the extracted repository, or None if failed.
+        """
+        url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{branch}"
+        
+        try:
+            response = self.session.get(url, stream=True, timeout=self.timeout)
+            if response.status_code == 200:
+                # Create temporary directory
+                temp_dir = tempfile.mkdtemp()
+                
+                # Extract zip to temporary directory
+                with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                    z.extractall(temp_dir)
+                
+                # Find the extracted folder (GitHub creates a folder with format: owner-repo-commit)
+                extracted_folders = [f for f in os.listdir(temp_dir) if os.path.isdir(os.path.join(temp_dir, f))]
+                if extracted_folders:
+                    repo_path = os.path.join(temp_dir, extracted_folders[0])
+                    return RepoFolderManager(repo_path)
+                    
+        except Exception as e:
+            print(f"Error downloading repository: {e}")
+        
+        return None
+
+    def get_base44_client_for_repo(self, owner: str, repo: str, token: str = "", timeout: int = 30):
+        """
+        Given a GitHub owner and repo, returns a Base44App client with the project_id found in base44Client.js.
+        Downloads repo locally to avoid API rate limits.
+        """
+        from base44_client import Base44App
+        base44_client_js = self.get_file_content_recursive(owner, repo, "src/api/base44Client.js")
+        if base44_client_js:
+            # Try to extract project_id from appId: "..."
+            import re
+            match = re.search(r'appId:\s*"([^"]+)"', base44_client_js)
+            if match:
+                project_id = match.group(1)
+                return Base44App(project_id, bearer_token=token, timeout=timeout)
+        return None
