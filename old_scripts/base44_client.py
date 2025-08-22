@@ -42,17 +42,27 @@ class Base44App:
             List of entity names
         """
         try:
-            # Use THE new approach because the last one got patched!
-            url = f"https://base44.app/api/apps/public/prod/by-id/{self.project_id}"
+            # Use the same approach as gather_database.py
+            url = f"{self.base_url}/entities/TEMP"
             response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
         except requests.RequestException as e:
-            print(f"Error fetching data from {url}:\n{e}")
-            return []
+            # Check if it's the expected "Entity TEMP not found" error
+            try:
+                data = response.json()
+                if "message" in data and isinstance(data["message"], str) and data["message"].startswith("Entity TEMP not found"):
+                    pass  # This is expected
+                else:
+                    print(f"Error fetching data from {url}:\n{e}")
+                    print("Servers Response:\n", response.json() if response.content else "No content returned.")
+                    return []
+            except:
+                print(f"Error fetching data from {url}:\n{e}")
+                return []
 
         data = response.json()
-        entities_dict = data.get("entities", {})
-        entities = list(entities_dict.keys()) if isinstance(entities_dict, dict) else []
+        after_colon = data.get("message", "").split(':')[1]
+        entities = [e.strip() for e in after_colon.split(',')]
         return entities
     
     def check_base44_table_has_data(self, entity: str) -> bool:
@@ -90,32 +100,22 @@ class Base44App:
 
         return tables_with_data
 
-    def get_entities_columns(self) -> Dict[str, List[str]]:
-        """
-        Get all entities and their column names from the Base44 project (using the new patched endpoint).
-        
-        Returns:
-            Dictionary mapping entity names to list of column names.
-        """
+    def get_entities_columns(self, entity: str) -> List[str]:
+        """Get all column names for a specific Base44 table/entity"""
         try:
-            url = f"https://base44.app/api/apps/public/prod/by-id/{self.project_id}"
-            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            entities_dict = data.get("entities", {})
-            result = {}
-            if isinstance(entities_dict, dict):
-                for entity_name, entity_info in entities_dict.items():
-                    properties = entity_info.get("properties", {})
-                    if isinstance(properties, dict):
-                        result[entity_name] = list(properties.keys())
-                    else:
-                        print(f"Warning: 'properties' for entity {entity_name} is not a dict.")
-                        result[entity_name] = []
-            return result
+            data = self.app.get_base44_table_data(entity, limit=1)
+            
+            # Check if we got actual data
+            if isinstance(data, list) and len(data) > 0:
+                # Get the first row to examine column names
+                first_row = data[0]
+                if isinstance(first_row, dict):
+                    # Return all column names (keys)
+                    return list(first_row.keys())
+            return []
         except Exception as e:
-            print(f"Error fetching entities and columns: {e}")
-            return {}
+            print(f"Error checking column names in table {entity}: {e}")
+            return []
 
     def get_base44_table_data(self, entity: str, limit: int = 1) -> List[Dict]:
         """

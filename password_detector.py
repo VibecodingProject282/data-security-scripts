@@ -36,18 +36,12 @@ class PasswordDetector:
         
         self.tables_with_passwords = []
     
-    def check_password_columns(self, entity: str) -> bool:
-        """Check if a table has columns containing 'password' in their names"""
-        try:
-            columns_name = self.app.get_entities_columns(entity)
-            # Check if we got actual data
-            if isinstance(columns_name, list) and len(columns_name) > 0:
-                for column_name in columns_name:
-                    if "password" in column_name.lower():
-                        print(f"🚨 Found password column: '{column_name}' in table '{entity}'")
-                        return True
-        except Exception as e:
-            print(f"Error checking password columns in table {entity}: {e}")
+    def check_password_columns(self, columns_names: List[str]) -> bool:
+        """Check if there are columns containing 'password' in their names"""
+        for column_name in columns_names:
+            if "password" in column_name.lower():
+                print(f"🚨 Found password column: '{column_name}'")
+                return True
         return False
 
     def check_table_no_data(self, entity: str) -> None:
@@ -57,19 +51,12 @@ class PasswordDetector:
 
     def detect_password_vulnerabilities(self) -> None:
         """Main method to detect password storage vulnerabilities"""
-        # Step 1: Get all entities
-        entities = self.app.get_base44_entities()
-        
-        # Step 2: Check each entity for password columns
-        for entity in entities:
-            if self.app.check_base44_table_has_data(entity):
-                if self.check_password_columns(entity):
-                    self.tables_with_passwords.append(entity)
-            else:
-                #self.check_table_no_data(entity)
-                pass
-        
-        # Step 3: Report findings
+        entities_columns = self.app.get_entities_columns()
+    
+        for entity, columns in entities_columns.items():
+            if self.check_password_columns(columns):
+                self.tables_with_passwords.append(entity)
+    
         if self.tables_with_passwords:
             print(f"🚨 Found password storage vulnerabilities in tables: {', '.join(self.tables_with_passwords)}")
         else:
