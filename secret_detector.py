@@ -18,7 +18,7 @@ import sys
 import json
 import argparse
 from typing import Tuple, Optional, List, Dict
-from utils import is_code_file, get_line_context, is_false_positive
+from utils import get_line_context
 from github_client import GitHubClient
 
 
@@ -42,16 +42,14 @@ class SecretDetector:
             # Access tokens
             r'(access_token["\']?\s*[:=]\s*["\']([a-zA-Z0-9]{32,})["\'])',
             r'(token["\']?\s*[:=]\s*["\']([a-zA-Z0-9]{32,})["\'])',
+            # OPENAI API keys
+            r'(sk-[A-Za-z0-9]{32,64})',
         ]
         
         for pattern in token_patterns:
             matches = re.finditer(pattern, content)
             for match in matches:
                 secret_value = match.group(1)
-                
-                # Skip if it's clearly not a secret
-                if is_false_positive(secret_value): # remove
-                    continue
                 
                 line_number = content[:match.start()].count('\n') + 1
                 secrets.append({
@@ -82,10 +80,6 @@ class SecretDetector:
             for match in matches:
                 var_name = match.group(1)
                 var_value = match.group(2)
-                
-                # Skip if it's clearly not a secret
-                if is_false_positive(var_value):
-                    continue
                 
                 line_number = content[:match.start()].count('\n') + 1
                 secrets.append({
