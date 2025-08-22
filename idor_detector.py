@@ -104,9 +104,9 @@ class IDORDetector:
         
         # Step 3: Report IDOR vulnerabilities
         if high_risk_tables:
-            print(f"🚨 HIGH IDOR risk tables: {', '.join(high_risk_tables)}")
+            print(f"\n🚨 HIGH IDOR risk tables: {', '.join(high_risk_tables)}")
         if low_risk_tables:
-            print(f"⚠️  LOW IDOR risk tables: {', '.join(low_risk_tables)}")
+            print(f"\n⚠️  LOW IDOR risk tables: {', '.join(low_risk_tables)}")
 
         # Return True if there are any risk tables
         return bool(high_risk_tables or low_risk_tables)

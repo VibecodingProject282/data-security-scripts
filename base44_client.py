@@ -21,8 +21,6 @@ class Base44App:
     
     def __init__(self, project_id: str, bearer_token: str, timeout: int = 30):
         """
-        Initialize Base44App
-        
         Args:
             project_id: Base44 project ID
             bearer_token: Bearer token for Base44 API authentication
@@ -36,19 +34,13 @@ class Base44App:
         self.headers = {'Authorization': f'Bearer {bearer_token}'}
     
     def get_base44_entities(self) -> List[str]:
-        """
-        Get all entities (tables) from the Base44 project
-        Returns:
-            List of entity names
-        """
         try:
             # Use THE new approach because the last one got patched!
             url = f"https://base44.app/api/apps/public/prod/by-id/{self.project_id}"
             response = self.session.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
         except requests.RequestException as e:
-            print(f"Error fetching data from {url}:\n{e}")
-            return []
+            return {"error_code": e.response.status_code, "msg": e.response.json()}
 
         data = response.json()
         entities_dict = data.get("entities", {})
@@ -56,31 +48,12 @@ class Base44App:
         return entities
     
     def check_base44_table_has_data(self, entity: str) -> bool:
-        """
-        Check if a Base44 table has at least one row of data using limit=1
-        
-        Args:
-            entity: Entity/table name
-            
-        Returns:
-            True if table has data, False otherwise
-        """
-        try:
-            url = f"{self.base_url}/entities/{entity}?limit=1"
-            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
-            response.raise_for_status()
-            
-            data = response.json()
-            # Check if we got actual data (not empty array or error)
-            if isinstance(data, list) and len(data) > 0:
-                return True
-            return False
-        except requests.RequestException as e:
-            print(f"Error checking table {entity}: {e}")
-            return False
+        first_row = self.get_base44_table_data(entity, limit=1)
+        if isinstance(first_row, list) and len(first_row) > 0:
+            return True
+        return False
 
     def find_tables_with_data(self) -> List[str]:
-        """Find all tables that have at least one row of data"""
         entities = self.get_base44_entities()
         tables_with_data = []
 
@@ -91,12 +64,7 @@ class Base44App:
         return tables_with_data
 
     def get_entities_columns(self) -> Dict[str, List[str]]:
-        """
-        Get all entities and their column names from the Base44 project (using the new patched endpoint).
-        
-        Returns:
-            Dictionary mapping entity names to list of column names.
-        """
+        """Returns Dictionary mapping entity names to list of column names."""
         try:
             url = f"https://base44.app/api/apps/public/prod/by-id/{self.project_id}"
             response = self.session.get(url, headers=self.headers, timeout=self.timeout)
@@ -118,16 +86,6 @@ class Base44App:
             return {}
 
     def get_base44_table_data(self, entity: str, limit: int = 1) -> List[Dict]:
-        """
-        Get data from a Base44 table
-        
-        Args:
-            entity: Entity/table name
-            limit: Number of rows to fetch
-            
-        Returns:
-            List of table rows as dictionaries
-        """
         try:
             url = f"{self.base_url}/entities/{entity}?limit={limit}"
             response = self.session.get(url, headers=self.headers, timeout=self.timeout)
@@ -139,4 +97,21 @@ class Base44App:
             return []
         except requests.RequestException as e:
             print(f"Error getting data from table {entity}: {e}")
+            return []
+
+    def get_integrations(self) -> List[str]:
+        try:
+            url = f"{self.base_url}/integration-endpoints/schema"
+            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+            # Extract all endpoint names from all installed packages
+            integrations = []
+            for package in data.get("installed_packages", []):
+                for endpoint in package.get("endpoints", []):
+                    if "name" in endpoint:
+                        integrations.append(endpoint["name"])
+            return integrations
+        except requests.RequestException as e:
+            print(f"Error getting integrations: {e}")
             return []
