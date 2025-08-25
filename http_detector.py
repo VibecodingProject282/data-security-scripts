@@ -179,18 +179,34 @@ def main():
 
     args = parser.parse_args()
     
-    # Create detector and run analysis
-    detector = HTTPDetector(timeout=args.timeout)
-    issues = detector.detect_http_security_issues(args.repo_url)
-    
-    # Print results
-    detector.print_results(args.repo_url, issues)
-    
-    # Exit with appropriate code
-    if issues:
+    try:
+        # Validate timeout parameter
+        if args.timeout <= 0:
+            print("Error: Timeout must be a positive number")
+            sys.exit(1)
+            
+        # Create detector and run analysis
+        detector = HTTPDetector(timeout=args.timeout)
+        issues = detector.detect_http_security_issues(args.repo_url)
+        
+        # Print results
+        detector.print_results(args.repo_url, issues)
+        
+        # Exit with appropriate code
+        if issues:
+            sys.exit(1)
+        else:
+            sys.exit(0)
+            
+    except ValueError as e:
+        print(f"Configuration error: {e}")
         sys.exit(1)
-    else:
-        sys.exit(0)
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

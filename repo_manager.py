@@ -36,9 +36,19 @@ class RepoFolderManager:
     def read_file(self, file_path: str) -> Optional[str]:
         """Read content from a local file"""
         try:
+            if not file_path or not os.path.exists(file_path):
+                return None
+                
+            if not os.path.isfile(file_path):
+                return None
+                
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 return f.read()
-        except Exception:
+        except (IOError, OSError, UnicodeError) as e:
+            print(f"Warning: Error reading file {file_path}: {e}")
+            return None
+        except Exception as e:
+            print(f"Warning: Unexpected error reading file {file_path}: {e}")
             return None
 
     def find_files(self, pattern: str = None) -> List[str]:
@@ -46,12 +56,25 @@ class RepoFolderManager:
         if not self.repo_path or not os.path.exists(self.repo_path):
             return []
         
+        if not os.path.isdir(self.repo_path):
+            print(f"Warning: Repository path is not a directory: {self.repo_path}")
+            return []
+        
         files = []
-        for root, dirs, filenames in os.walk(self.repo_path):
-            for filename in filenames:
-                file_path = os.path.join(root, filename)
-                if pattern is None or filename.endswith(pattern) or pattern in filename:
-                    files.append(file_path)
+        try:
+            for root, dirs, filenames in os.walk(self.repo_path):
+                for filename in filenames:
+                    try:
+                        file_path = os.path.join(root, filename)
+                        if pattern is None or filename.endswith(pattern) or pattern in filename:
+                            files.append(file_path)
+                    except Exception as e:
+                        print(f"Warning: Error processing file {filename}: {e}")
+                        continue
+        except Exception as e:
+            print(f"Error: Failed to walk directory {self.repo_path}: {e}")
+            return []
+            
         return files
 
     def find_file_by_name(self, filename: str) -> Optional[str]:
@@ -100,8 +123,11 @@ class RepoFolderManager:
 
     def cleanup(self):
         """Clean up temporary directory (only if not using cache)"""
-        if not self.use_cache and self.temp_dir and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        try:
+            if not self.use_cache and self.temp_dir and os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir, ignore_errors=True)
+        except Exception as e:
+            print(f"Warning: Error during cleanup of {self.temp_dir}: {e}")
 
     def __enter__(self):
         """Context manager entry"""

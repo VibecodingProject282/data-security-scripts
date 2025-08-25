@@ -34,7 +34,6 @@ class GitHubClient:
         Args:
             timeout: Request timeout in seconds
         """
-        self.session = requests.Session()
         self.timeout = timeout
         # read the GitHub token from the token.txt file
         self.github_token = self.read_github_token()
@@ -43,16 +42,28 @@ class GitHubClient:
         self.cache_dir = os.path.join(os.getcwd(), "downloaded-projects")
         os.makedirs(self.cache_dir, exist_ok=True)
 
+        # Set up headers for authentication if token is available
+        self.headers = {}
         if self.github_token:
-            self.session.headers.update({'Authorization': f'token {self.github_token}'})
+            self.headers['Authorization'] = f'token {self.github_token}'
 
     def read_github_token(self) -> Optional[str]:
         """Read GitHub token from token.txt file"""
         try:
+            if not os.path.exists("token.txt"):
+                print("Warning: token.txt file not found. API rate limits may apply.")
+                return None
+                
             with open("token.txt", "r") as file:
-                return file.read().strip()
+                token = file.read().strip()
+                if not token:
+                    print("Warning: token.txt is empty. API rate limits may apply.")
+                    return None
+                return token
+        except IOError as e:
+            print(f"Warning: Error reading GitHub token file: {e}")
         except Exception as e:
-            print(f"Error reading GitHub token: {e}")
+            print(f"Warning: Unexpected error reading GitHub token: {e}")
         return None
 
     def parse_github_url(self, url: str) -> Tuple[str, str]:
@@ -85,12 +96,40 @@ class GitHubClient:
         Returns:
             List of file paths in the repository
         """
+        if not owner or not repo:
+            print("Error: Invalid owner or repository name")
+            return []
+            
         url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
         try:
-            response = self.session.get(url, timeout=self.timeout)
-            if response.status_code == 200:
-                data = response.json()
-                return [item['path'] for item in data.get('tree', []) if item['type'] == 'blob']
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
+            
+            if response.status_code == 404:
+                print(f"Error: Repository {owner}/{repo} not found")
+                return []
+            elif response.status_code == 403:
+                print("Error: API rate limit exceeded or access denied")
+                return []
+            elif response.status_code != 200:
+                print(f"Error: GitHub API returned status {response.status_code}")
+                return []
+                
+            data = response.json()
+            if not isinstance(data, dict) or 'tree' not in data:
+                print("Error: Unexpected response format from GitHub API")
+                return []
+                
+            return [item['path'] for item in data.get('tree', []) 
+                   if isinstance(item, dict) and item.get('type') == 'blob' and 'path' in item]
+                   
+        except requests.Timeout:
+            print(f"Error: Request timeout after {self.timeout} seconds")
+            return []
+        except requests.ConnectionError:
+            print("Error: Failed to connect to GitHub API")
+            return []
+        except ValueError as e:
+            print(f"Error: Invalid JSON response from GitHub API: {e}")
             return []
         except Exception as e:
             print(f"Error getting repository tree: {e}")
@@ -108,15 +147,47 @@ class GitHubClient:
         Returns:
             File content as string, or None if not found
         """
+        if not owner or not repo or not file_path:
+            print("Error: Invalid parameters for file content request")
+            return None
+            
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
         try:
-            response = self.session.get(url, timeout=self.timeout)
-            if response.status_code == 200:
-                data = response.json()
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
+            
+            if response.status_code == 404:
+                print(f"Warning: File {file_path} not found in repository")
+                return None
+            elif response.status_code == 403:
+                print("Error: API rate limit exceeded or access denied")
+                return None
+            elif response.status_code != 200:
+                print(f"Error: GitHub API returned status {response.status_code} for file {file_path}")
+                return None
+                
+            data = response.json()
+            if not isinstance(data, dict) or 'content' not in data:
+                print(f"Error: Unexpected response format for file {file_path}")
+                return None
+                
+            try:
                 return base64.b64decode(data['content']).decode('utf-8')
+            except (base64.binascii.Error, UnicodeDecodeError) as e:
+                print(f"Error: Failed to decode file content for {file_path}: {e}")
+                return None
+                
+        except requests.Timeout:
+            print(f"Error: Request timeout for file {file_path} after {self.timeout} seconds")
+            return None
+        except requests.ConnectionError:
+            print(f"Error: Failed to connect to GitHub API for file {file_path}")
+            return None
+        except ValueError as e:
+            print(f"Error: Invalid JSON response for file {file_path}: {e}")
+            return None
         except Exception as e:
             print(f"Error getting file {file_path}: {e}")
-        return None
+            return None
     
     def find_file_recursive(self, owner: str, repo: str, filename: str) -> Optional[str]:
         """
@@ -241,7 +312,7 @@ class GitHubClient:
         url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{branch}"
         
         try:
-            response = self.session.get(url, stream=True, timeout=self.timeout)
+            response = requests.get(url, headers=self.headers, stream=True, timeout=self.timeout)
             if response.status_code == 200:
                 # Create cache directory for this repo
                 os.makedirs(cached_path, exist_ok=True)

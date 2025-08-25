@@ -29,7 +29,6 @@ class Base44App:
         self.project_id = project_id
         self.bearer_token = bearer_token
         self.timeout = timeout
-        self.session = requests.Session()
         self.base_url = f"https://base44.app/api/apps/{project_id}"
         self.headers = {'Authorization': f'Bearer {bearer_token}'}
     
@@ -37,15 +36,38 @@ class Base44App:
         try:
             # Use THE new approach because the last one got patched!
             url = f"https://base44.app/api/apps/public/prod/by-id/{self.project_id}"
-            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
+            
+            data = response.json()
+            entities_dict = data.get("entities", {})
+            entities = list(entities_dict.keys()) if isinstance(entities_dict, dict) else []
+            return entities
+            
+        except requests.Timeout:
+            print(f"Error: Request timeout after {self.timeout} seconds")
+            return {"error_code": 408, "msg": "Request timeout"}
+        except requests.ConnectionError:
+            print("Error: Failed to connect to Base44 API")
+            return {"error_code": 503, "msg": "Connection error"}
+        except requests.HTTPError as e:
+            print(f"Error: HTTP {e.response.status_code} - {e.response.reason}")
+            try:
+                error_data = e.response.json()
+                return {"error_code": e.response.status_code, "msg": error_data}
+            except:
+                return {"error_code": e.response.status_code, "msg": str(e)}
+        except ValueError as e:
+            print(f"Error: Invalid JSON response - {e}")
+            return {"error_code": 500, "msg": "Invalid response format"}
         except requests.RequestException as e:
-            return {"error_code": e.response.status_code, "msg": e.response.json()}
-
-        data = response.json()
-        entities_dict = data.get("entities", {})
-        entities = list(entities_dict.keys()) if isinstance(entities_dict, dict) else []
-        return entities
+            print(f"Error: Request failed - {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    return {"error_code": e.response.status_code, "msg": e.response.json()}
+                except:
+                    return {"error_code": e.response.status_code, "msg": str(e)}
+            return {"error_code": 500, "msg": str(e)}
     
     def check_base44_table_has_data(self, entity: str) -> bool:
         first_row = self.get_base44_table_data(entity, limit=1)
@@ -67,7 +89,7 @@ class Base44App:
         """Returns Dictionary mapping entity names to list of column names."""
         try:
             url = f"https://base44.app/api/apps/public/prod/by-id/{self.project_id}"
-            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
             entities_dict = data.get("entities", {})
@@ -87,13 +109,30 @@ class Base44App:
 
     def get_base44_table_data(self, entity: str, limit: int = 1) -> List[Dict]:
         try:
+            if not entity or not isinstance(entity, str):
+                print("Error: Invalid entity name provided")
+                return []
+                
             url = f"{self.base_url}/entities/{entity}?limit={limit}"
-            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             
             data = response.json()
             if isinstance(data, list):
                 return data
+            return []
+            
+        except requests.Timeout:
+            print(f"Error: Request timeout for table {entity} after {self.timeout} seconds")
+            return []
+        except requests.ConnectionError:
+            print(f"Error: Failed to connect to Base44 API for table {entity}")
+            return []
+        except requests.HTTPError as e:
+            print(f"Error getting data from table {entity}: HTTP {e.response.status_code}")
+            return []
+        except ValueError as e:
+            print(f"Error: Invalid JSON response for table {entity}: {e}")
             return []
         except requests.RequestException as e:
             print(f"Error getting data from table {entity}: {e}")
@@ -102,16 +141,36 @@ class Base44App:
     def get_integrations(self) -> List[str]:
         try:
             url = f"{self.base_url}/integration-endpoints/schema"
-            response = self.session.get(url, headers=self.headers, timeout=self.timeout)
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
+            
             data = response.json()
+            if not isinstance(data, dict):
+                print("Error: Unexpected response format for integrations")
+                return []
+                
             # Extract all endpoint names from all installed packages
             integrations = []
             for package in data.get("installed_packages", []):
+                if not isinstance(package, dict):
+                    continue
                 for endpoint in package.get("endpoints", []):
-                    if "name" in endpoint:
+                    if isinstance(endpoint, dict) and "name" in endpoint:
                         integrations.append(endpoint["name"])
             return integrations
+            
+        except requests.Timeout:
+            print(f"Error: Request timeout for integrations after {self.timeout} seconds")
+            return []
+        except requests.ConnectionError:
+            print("Error: Failed to connect to Base44 API for integrations")
+            return []
+        except requests.HTTPError as e:
+            print(f"Error getting integrations: HTTP {e.response.status_code}")
+            return []
+        except ValueError as e:
+            print(f"Error: Invalid JSON response for integrations: {e}")
+            return []
         except requests.RequestException as e:
             print(f"Error getting integrations: {e}")
             return []

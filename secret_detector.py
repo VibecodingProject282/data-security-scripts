@@ -116,17 +116,23 @@ class SecretDetector:
     def detect_secrets(self, repo_url: str) -> List[Dict]:
         """Main method to detect secrets in the repository"""
         try:
+            if not repo_url or not isinstance(repo_url, str):
+                print("Error: Invalid repository URL provided")
+                return []
+                
             owner, repo = self.github_client.parse_github_url(repo_url)
             
             # Download repository locally using context manager
             with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
                 if not repo_manager:
+                    print("Error: Failed to download repository")
                     return []
                 
                 # Get ALL files from local repository (not just code files)
                 all_files = repo_manager.find_files()
                 
                 if not all_files:
+                    print("Warning: No files found in repository")
                     return []
                 
                 # Scan each file
@@ -139,9 +145,13 @@ class SecretDetector:
                             all_secrets.extend(secrets)
                     except Exception as e:
                         print(f"⚠️  Error scanning {relative_path}: {e}")
+                        continue
                 
                 return all_secrets
             
+        except ValueError as e:
+            print(f"❌ Invalid repository URL: {e}")
+            return []
         except Exception as e:
             print(f"❌ Error analyzing repository: {e}")
             return []
@@ -185,17 +195,33 @@ def main():
 
     args = parser.parse_args()
     
-    # Create detector and run analysis
-    detector = SecretDetector(timeout=args.timeout)
-    secrets = detector.detect_secrets(args.repo_url)
-    
-    # Print results
-    detector.print_results(args.repo_url, secrets)
-    
-    # Exit with appropriate code
-    if secrets:
+    try:
+        # Validate timeout parameter
+        if args.timeout <= 0:
+            print("Error: Timeout must be a positive number")
+            sys.exit(1)
+            
+        # Create detector and run analysis
+        detector = SecretDetector(timeout=args.timeout)
+        secrets = detector.detect_secrets(args.repo_url)
+        
+        # Print results
+        detector.print_results(args.repo_url, secrets)
+        
+        # Exit with appropriate code
+        if secrets:
+            sys.exit(1)
+        sys.exit(0)
+        
+    except ValueError as e:
+        print(f"Configuration error: {e}")
         sys.exit(1)
-    sys.exit(0)
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

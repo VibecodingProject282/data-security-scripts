@@ -23,19 +23,29 @@ class IDORDetector:
     """Detects potential IDOR vulnerabilities in Base44 projects"""
     
     def __init__(self, bearer_token: str, repo_url: str):
-        self.bearer_token = bearer_token
-        self.github_client = GitHubClient()
-        
-        # Extract owner and repo from URL and get Base44 client
-        owner, repo = self.github_client.parse_github_url(repo_url)
-        self.base44_app = self.github_client.get_base44_client_for_repo(owner, repo, bearer_token)
-        
-        if not self.base44_app:
-            raise ValueError(f"Could not find Base44 project ID in repository {repo_url}")
-        
-        self.project_id = self.base44_app.project_id
-
-        self.postman_tables = []
+        try:
+            self.bearer_token = bearer_token
+            self.github_client = GitHubClient()
+            
+            if not bearer_token or not isinstance(bearer_token, str):
+                raise ValueError("Invalid bearer token provided")
+            
+            if not repo_url or not isinstance(repo_url, str):
+                raise ValueError("Invalid repository URL provided")
+            
+            # Extract owner and repo from URL and get Base44 client
+            owner, repo = self.github_client.parse_github_url(repo_url)
+            self.base44_app = self.github_client.get_base44_client_for_repo(owner, repo, bearer_token)
+            
+            if not self.base44_app:
+                raise ValueError(f"Could not find Base44 project ID in repository {repo_url}")
+            
+            self.project_id = self.base44_app.project_id
+            self.postman_tables = []
+            
+        except Exception as e:
+            print(f"Error initializing IDORDetector: {e}")
+            raise
     
     def search_tables_in_file(self, file_content: str, tables: List[str]) -> List[str]:
         """Search for table names in file content using import statements"""
@@ -57,29 +67,39 @@ class IDORDetector:
     def check_frontend_references(self, repo_url: str, data_tables: List[str], all_tables: List[str]) -> Tuple[List[str], List[str]]:
         """Check which tables are referenced in the frontend code"""
         try:
+            if not data_tables and not all_tables:
+                print("Warning: No tables to check for frontend references")
+                return [], []
+                
             owner, repo = self.github_client.parse_github_url(repo_url)
             
             # Download repository locally using context manager
             with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
                 if not repo_manager:
+                    print("Error: Failed to download repository")
                     return [], []
                 
                 # Find all JavaScript/TypeScript files in pages directory
                 pages_files = repo_manager.find_files_in_directory('pages', ['.jsx', '.js', '.tsx', '.ts'])
                 
                 if not pages_files:
+                    print("Warning: No frontend files found in pages directory")
                     return [], []
                 
                 referenced_tables = set()
                 
                 for file_path in pages_files:
-                    file_content = repo_manager.read_file(file_path)
-                    if file_content:
-                        found_tables = self.search_tables_in_file(file_content, all_tables)
-                        if found_tables:
-                            relative_path = repo_manager.get_relative_path(file_path)
-                            print(f"📁 {relative_path}: Found references to {found_tables}")
-                            referenced_tables.update(found_tables)
+                    try:
+                        file_content = repo_manager.read_file(file_path)
+                        if file_content:
+                            found_tables = self.search_tables_in_file(file_content, all_tables)
+                            if found_tables:
+                                relative_path = repo_manager.get_relative_path(file_path)
+                                print(f"📁 {relative_path}: Found references to {found_tables}")
+                                referenced_tables.update(found_tables)
+                    except Exception as e:
+                        print(f"Warning: Error processing file {file_path}: {e}")
+                        continue
                 
                 # Return tables that are NOT referenced in frontend
                 high_risk_tables = [table for table in data_tables if table not in referenced_tables]
@@ -124,14 +144,25 @@ def main():
     
     args = parser.parse_args()
     
-    # Create detector and run analysis
-    detector = IDORDetector(args.token, args.repo_url)
-    found = detector.detect_idor_vulnerabilities(args.repo_url)
+    try:
+        # Create detector and run analysis
+        detector = IDORDetector(args.token, args.repo_url)
+        found = detector.detect_idor_vulnerabilities(args.repo_url)
 
-    # Exit with appropriate code
-    if found:
+        # Exit with appropriate code
+        if found:
+            sys.exit(1)
+        sys.exit(0)
+        
+    except ValueError as e:
+        print(f"Configuration error: {e}")
         sys.exit(1)
-    sys.exit(0)
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

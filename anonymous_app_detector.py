@@ -23,48 +23,68 @@ class AnonymousAppDetector:
     """Detects anonymous access vulnerabilities in Base44 projects"""
 
     def __init__(self, repo_url: str):
-        self.repo_url = repo_url
-        self.github_client = GitHubClient()
-        
-        # Extract owner and repo from URL
-        owner, repo = self.github_client.parse_github_url(repo_url)
-        self.owner = owner
-        self.repo = repo
-        
-        # Get project ID without authentication
-        self.app = self.github_client.get_base44_client_for_repo(owner, repo)
-        if not self.app:
-            raise ValueError(f"Could not find Base44 app in repository {repo_url}")
+        try:
+            if not repo_url or not isinstance(repo_url, str):
+                raise ValueError("Invalid repository URL provided")
+                
+            self.repo_url = repo_url
+            self.github_client = GitHubClient()
+            
+            # Extract owner and repo from URL
+            owner, repo = self.github_client.parse_github_url(repo_url)
+            self.owner = owner
+            self.repo = repo
+            
+            # Get project ID without authentication
+            self.app = self.github_client.get_base44_client_for_repo(owner, repo)
+            if not self.app:
+                raise ValueError(f"Could not find Base44 app in repository {repo_url}")
 
-        self.session = requests.Session()
-        self.timeout = 30
-        self.accessible_entities = []
+            self.timeout = 30
+            self.accessible_entities = []
+            
+        except Exception as e:
+            print(f"Error initializing AnonymousAppDetector: {e}")
+            raise
     
     def detect_anonymous_access(self) -> None:
         """Main method to detect anonymous access vulnerabilities"""
-        print(f"🔍 Checking anonymous access for app: {self.app.project_id}")
+        try:
+            print(f"🔍 Checking anonymous access for app: {self.app.project_id}")
 
-        # Try to get entities without authentication
-        response = self.app.get_base44_entities()
+            # Try to get entities without authentication
+            response = self.app.get_base44_entities()
 
-        if not isinstance(response, list):
-            if response.get("error_code") == 403:  # Forbidden
-                print("✅ No anonymous access detected")
-            else:  # if it failed with a different error
-                print("An Error occurred While fetching entities")
-            return
-        
-        entities = response
-        # Check each entity for data access
-        for entity in entities:
-            if self.app.check_base44_table_has_data(entity):
-                self.accessible_entities.append(entity)
-                print(f"🚨 Entity '{entity}' allows anonymous data access")
-        
-        if self.accessible_entities:
-            print(f"\n🚨 Anonymous access vulnerability: {len(self.accessible_entities)} entities with accessible data")
-        else:
-            print("✅ No entities with anonymous data access found")
+            if not isinstance(response, list):
+                if isinstance(response, dict) and response.get("error_code") == 403:  # Forbidden
+                    print("✅ No anonymous access detected")
+                else:  # if it failed with a different error
+                    print("An Error occurred While fetching entities")
+                return
+            
+            entities = response
+            if not entities:
+                print("Warning: No entities found in the project")
+                return
+                
+            # Check each entity for data access
+            for entity in entities:
+                try:
+                    if self.app.check_base44_table_has_data(entity):
+                        self.accessible_entities.append(entity)
+                        print(f"🚨 Entity '{entity}' allows anonymous data access")
+                except Exception as e:
+                    print(f"Warning: Error checking entity {entity}: {e}")
+                    continue
+            
+            if self.accessible_entities:
+                print(f"\n🚨 Anonymous access vulnerability: {len(self.accessible_entities)} entities with accessible data")
+            else:
+                print("✅ No entities with anonymous data access found")
+                
+        except Exception as e:
+            print(f"Error during anonymous access detection: {e}")
+            raise
 
 
 def main():
@@ -88,8 +108,14 @@ def main():
             sys.exit(1)
         sys.exit(0)
         
+    except ValueError as e:
+        print(f"Configuration error: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Unexpected error: {e}")
         sys.exit(1)
 
 

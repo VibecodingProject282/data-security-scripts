@@ -22,25 +22,40 @@ class IntegrationsRetriever:
     """Retrieves and displays Base44 project integrations"""
     
     def __init__(self, bearer_token: str, repo_url: str):
-        self.bearer_token = bearer_token
-        self.github_client = GitHubClient()
-        
-        # Extract owner and repo from URL and get Base44 client
-        owner, repo = self.github_client.parse_github_url(repo_url)
-        self.app = self.github_client.get_base44_client_for_repo(owner, repo, bearer_token)
-        
-        if not self.app:
-            raise ValueError(f"Could not find Base44 project ID in repository {repo_url}")
-        
-        self.project_id = self.app.project_id
-        self.integrations = []
+        try:
+            self.bearer_token = bearer_token
+            self.github_client = GitHubClient()
+            
+            if not bearer_token or not isinstance(bearer_token, str):
+                raise ValueError("Invalid bearer token provided")
+            
+            if not repo_url or not isinstance(repo_url, str):
+                raise ValueError("Invalid repository URL provided")
+            
+            # Extract owner and repo from URL and get Base44 client
+            owner, repo = self.github_client.parse_github_url(repo_url)
+            self.app = self.github_client.get_base44_client_for_repo(owner, repo, bearer_token)
+            
+            if not self.app:
+                raise ValueError(f"Could not find Base44 project ID in repository {repo_url}")
+            
+            self.project_id = self.app.project_id
+            self.integrations = []
+            
+        except Exception as e:
+            print(f"Error initializing IntegrationsRetriever: {e}")
+            raise
     
     def get_integrations(self) -> None:
         """Main method to retrieve and display integrations"""
-        print(f"🔍 Fetching integrations for Base44 app: {self.project_id}")
-        
         try:
+            print(f"🔍 Fetching integrations for Base44 app: {self.project_id}")
+            
             self.integrations = self.app.get_integrations()
+            
+            if not isinstance(self.integrations, list):
+                print("Error: Failed to retrieve integrations")
+                sys.exit(1)
             
             if self.integrations:
                 print(f"📊 Found {len(self.integrations)} integrations:")
@@ -77,8 +92,14 @@ def main():
         else:
             print("\n✅ No integrations found (this is normal for projects without integrations)")
             
+    except ValueError as e:
+        print(f"Configuration error: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Unexpected error: {e}")
         sys.exit(1)
     
     sys.exit(0)
