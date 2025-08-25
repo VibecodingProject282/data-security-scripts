@@ -32,6 +32,88 @@ class RepoFolderManager:
         self.use_cache = use_cache
         # Only set temp_dir for cleanup if not using cache
         self.temp_dir = None if use_cache else (os.path.dirname(repo_path) if repo_path else None)
+        
+        # Check and clean cache if needed (silently)
+        if use_cache:
+            self._check_and_clean_cache()
+    
+    def _get_cache_directory(self) -> Optional[str]:
+        """Get the cache directory path"""
+        if not self.use_cache or not self.repo_path:
+            return None
+        
+        # Navigate up to find the cache directory (downloaded-projects)
+        current_path = self.repo_path
+        while current_path and current_path != os.path.dirname(current_path):
+            parent = os.path.dirname(current_path)
+            if os.path.basename(parent) == "downloaded-projects":
+                return parent
+            current_path = parent
+        return None
+    
+    def _get_directory_size(self, directory: str) -> int:
+        """Get total size of directory in bytes"""
+        total_size = 0
+        try:
+            for dirpath, dirnames, filenames in os.walk(directory):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    try:
+                        total_size += os.path.getsize(filepath)
+                    except (OSError, IOError):
+                        pass  # Skip files that can't be accessed
+        except (OSError, IOError):
+            pass
+        return total_size
+    
+    def _check_and_clean_cache(self):
+        """Check cache limits and clean if needed (silent operation)"""
+        cache_dir = self._get_cache_directory()
+        if not cache_dir or not os.path.exists(cache_dir):
+            return
+        
+        try:
+            # Get all cached repo directories
+            cached_repos = []
+            for item in os.listdir(cache_dir):
+                item_path = os.path.join(cache_dir, item)
+                if os.path.isdir(item_path):
+                    # Get modification time for sorting (oldest first)
+                    mtime = os.path.getmtime(item_path)
+                    cached_repos.append((item_path, mtime))
+            
+            # Sort by modification time (oldest first)
+            cached_repos.sort(key=lambda x: x[1])
+            
+            # Check repo count limit (5 repos)
+            if len(cached_repos) > 5:
+                # Remove oldest repos until we have 5 or fewer
+                repos_to_remove = cached_repos[:-5]
+                for repo_path, _ in repos_to_remove:
+                    try:
+                        shutil.rmtree(repo_path, ignore_errors=True)
+                    except:
+                        pass
+                # Update the list
+                cached_repos = cached_repos[-5:]
+            
+            # Check size limit (100MB = 100 * 1024^2 bytes)
+            size_limit = 100 * 1024 * 1024  # 100MB
+            total_size = sum(self._get_directory_size(repo_path) for repo_path, _ in cached_repos)
+            
+            # If still over size limit, remove oldest repos until under limit
+            while total_size > size_limit and cached_repos:
+                repo_path, _ = cached_repos.pop(0)  # Remove oldest
+                try:
+                    repo_size = self._get_directory_size(repo_path)
+                    shutil.rmtree(repo_path, ignore_errors=True)
+                    total_size -= repo_size
+                except:
+                    pass
+                    
+        except:
+            # Silent failure - don't interrupt the main operation
+            pass
     
     def read_file(self, file_path: str) -> Optional[str]:
         """Read content from a local file"""
@@ -126,8 +208,11 @@ class RepoFolderManager:
         try:
             if not self.use_cache and self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
+            elif self.use_cache:
+                # Check and clean cache again after operations
+                self._check_and_clean_cache()
         except Exception as e:
-            print(f"Warning: Error during cleanup of {self.temp_dir}: {e}")
+            pass  # Silent cleanup
 
     def __enter__(self):
         """Context manager entry"""
