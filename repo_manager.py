@@ -177,16 +177,10 @@ class RepoFolderManager:
         """Get all code files from the repository"""
         if not self.repo_path:
             return []
-            
-        try:
-            from utils import is_code_file
-            all_files = self.find_files()
-            return [f for f in all_files if is_code_file(self.get_relative_path(f))]
-        except ImportError:
-            # Fallback if utils is not available
-            code_extensions = {'.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.cs', '.php', '.rb', '.go'}
-            all_files = self.find_files()
-            return [f for f in all_files if any(f.endswith(ext) for ext in code_extensions)]
+        code_extensions = {'.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.cs', '.php', '.rb', '.go'}
+        all_files = self.find_files()
+        return [f for f in all_files if any(f.endswith(ext) for ext in code_extensions)]
+
 
     def find_files_in_directory(self, directory_name: str, file_extensions: List[str] = None) -> List[str]:
         """Find files in a specific directory (e.g., 'pages', 'src') with optional file extensions"""

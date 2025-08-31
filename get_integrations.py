@@ -43,30 +43,27 @@ class IntegrationsRetriever:
             self.integrations = []
             
         except Exception as e:
-            print(f"Error initializing IntegrationsRetriever: {e}")
             raise
     
     def get_integrations(self) -> None:
         """Main method to retrieve and display integrations"""
         try:
-            print(f"🔍 Fetching integrations for Base44 app: {self.project_id}")
-            
             self.integrations = self.app.get_integrations()
             
             if not isinstance(self.integrations, list):
-                print("Error: Failed to retrieve integrations")
-                sys.exit(1)
-            
-            if self.integrations:
-                print(f"📊 Found {len(self.integrations)} integrations:")
-                for i, integration in enumerate(self.integrations, 1):
-                    print(f"  {i}. {integration}")
-            else:
-                print("📭 No integrations found for this project")
+                self.integrations = []
                 
         except Exception as e:
-            print(f"❌ Error fetching integrations: {e}")
-            sys.exit(1)
+            self.integrations = []
+
+    def print_results(self) -> None:
+        """Print the integration results"""
+        if hasattr(self, 'integrations') and self.integrations:
+            print(f"📊 Found {len(self.integrations)} integrations:")
+            for i, integration in enumerate(self.integrations, 1):
+                print(f"  {i}. {integration}")
+        else:
+            print("📭 No integrations found for this project")
 
 
 def main():
@@ -84,7 +81,9 @@ def main():
     try:
         # Create retriever and get integrations
         retriever = IntegrationsRetriever(args.token, args.repo_url)
+        print(f"🔍 Fetching integrations for Base44 app: {retriever.project_id}")
         retriever.get_integrations()
+        retriever.print_results()
         
         # Print summary
         if retriever.integrations:

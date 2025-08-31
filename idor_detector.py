@@ -68,7 +68,6 @@ class IDORDetector:
         """Check which tables are referenced in the frontend code"""
         try:
             if not data_tables and not all_tables:
-                print("Warning: No tables to check for frontend references")
                 return [], []
                 
             owner, repo = self.github_client.parse_github_url(repo_url)
@@ -76,14 +75,12 @@ class IDORDetector:
             # Download repository locally using context manager
             with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
                 if not repo_manager:
-                    print("Error: Failed to download repository")
                     return [], []
                 
                 # Find all JavaScript/TypeScript files in pages directory
                 pages_files = repo_manager.find_files_in_directory('pages', ['.jsx', '.js', '.tsx', '.ts'])
                 
                 if not pages_files:
-                    print("Warning: No frontend files found in pages directory")
                     return [], []
                 
                 referenced_tables = set()
@@ -94,11 +91,8 @@ class IDORDetector:
                         if file_content:
                             found_tables = self.search_tables_in_file(file_content, all_tables)
                             if found_tables:
-                                relative_path = repo_manager.get_relative_path(file_path)
-                                print(f"📁 {relative_path}: Found references to {found_tables}")
                                 referenced_tables.update(found_tables)
                     except Exception as e:
-                        print(f"Warning: Error processing file {file_path}: {e}")
                         continue
                 
                 # Return tables that are NOT referenced in frontend
@@ -107,7 +101,6 @@ class IDORDetector:
                 return high_risk_tables, low_risk_tables
 
         except Exception as e:
-            print(f"Error checking frontend references: {e}")
             return [], []
     
     def detect_idor_vulnerabilities(self, repo_url: str) -> bool:
@@ -120,16 +113,21 @@ class IDORDetector:
             return False
         
         # Step 2: Check frontend references
-        high_risk_tables, low_risk_tables = self.check_frontend_references(repo_url, self.data_tables, self.all_tables)
+        self.high_risk_tables, self.low_risk_tables = self.check_frontend_references(repo_url, self.data_tables, self.all_tables)
         
-        # Step 3: Report IDOR vulnerabilities
-        if high_risk_tables:
-            print(f"\n🚨 HIGH IDOR risk tables: {', '.join(high_risk_tables)}")
-        if low_risk_tables:
-            print(f"\n⚠️  LOW IDOR risk tables: {', '.join(low_risk_tables)}")
-
         # Return True if there are any risk tables
-        return bool(high_risk_tables or low_risk_tables)
+        return bool(self.high_risk_tables or self.low_risk_tables)
+    
+    def print_results(self):
+        """Print the IDOR detection results"""
+        if hasattr(self, 'high_risk_tables') and self.high_risk_tables:
+            print(f"\n🚨 HIGH IDOR risk tables: {', '.join(self.high_risk_tables)}")
+        if hasattr(self, 'low_risk_tables') and self.low_risk_tables:
+            print(f"\n⚠️  LOW IDOR risk tables: {', '.join(self.low_risk_tables)}")
+        
+        # If no risks found, show success message
+        if not (hasattr(self, 'high_risk_tables') and self.high_risk_tables) and not (hasattr(self, 'low_risk_tables') and self.low_risk_tables):
+            print("✅ No IDOR vulnerabilities detected")
 
 
 def main():
@@ -148,6 +146,7 @@ def main():
         # Create detector and run analysis
         detector = IDORDetector(args.token, args.repo_url)
         found = detector.detect_idor_vulnerabilities(args.repo_url)
+        detector.print_results()
 
         # Exit with appropriate code
         if found:

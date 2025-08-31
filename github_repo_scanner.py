@@ -19,6 +19,7 @@ The script will:
    - Run static code analysis (secrets, HTTP URLs, HTTPS certificates)
    - Run authenticated analysis if bearer token provided (passwords, IDOR, integrations)
 3. Generate a comprehensive security report
+4. Save individual analysis results as JSON files in the 'repo-scanner-results' folder
 """
 
 import sys
@@ -26,6 +27,7 @@ import argparse
 import requests
 import time
 import json
+import os
 from typing import List, Dict, Optional, Any
 from urllib.parse import quote
 
@@ -56,6 +58,51 @@ class GitHubRepoScanner:
         self.bearer_token = bearer_token
         self.github_client = GitHubClient()
         self.results = []
+        self.results_folder = "repo-scanner-results"
+        self._ensure_results_directory()
+        
+    def _ensure_results_directory(self):
+        """Create the results directory if it doesn't exist"""
+        if not os.path.exists(self.results_folder):
+            os.makedirs(self.results_folder)
+            print(f"✅ Created results directory: {self.results_folder}")
+        
+    def _sanitize_filename(self, repo_name: str) -> str:
+        """
+        Sanitize repository name to create a valid filename
+        
+        Args:
+            repo_name: Repository full name (e.g., 'owner/repo-name')
+            
+        Returns:
+            Sanitized filename safe for the file system
+        """
+        # Replace problematic characters with safe alternatives
+        sanitized = repo_name.replace('/', '_').replace('\\', '_')
+        sanitized = sanitized.replace(':', '_').replace('*', '_')
+        sanitized = sanitized.replace('?', '_').replace('"', '_')
+        sanitized = sanitized.replace('<', '_').replace('>', '_')
+        sanitized = sanitized.replace('|', '_')
+        return sanitized
+        
+    def _save_repo_result(self, analysis_result: Dict[str, Any]):
+        """
+        Save individual repository analysis result to a file
+        
+        Args:
+            analysis_result: Dictionary containing the complete analysis results
+        """
+        repo_name = analysis_result['repository']['full_name']
+        sanitized_name = self._sanitize_filename(repo_name)
+        filename = f"{sanitized_name}_analysis.json"
+        filepath = os.path.join(self.results_folder, filename)
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(analysis_result, f, indent=2, ensure_ascii=False)
+            print(f"   Saved to {filename}")
+        except Exception as e:
+            print(f"❌ Error saving results for {repo_name}: {e}")
         
     def search_repositories(self) -> List[Dict[str, Any]]:
         """
@@ -64,10 +111,7 @@ class GitHubRepoScanner:
         Returns:
             List of repository dictionaries containing repo information
         """
-        print("=" * 80)
-        print(f"🔍 SEARCHING GITHUB FOR: '{self.search_query}'")
-        print(f"📊 Limit: {self.limit} repositories")
-        print("=" * 80)
+        print(f"🔍 Searching for '{self.search_query}' (limit: {self.limit})")
         
         # Prepare the search URL
         encoded_query = quote(self.search_query)
@@ -83,9 +127,6 @@ class GitHubRepoScanner:
         headers = {}
         if self.github_client.github_token:
             headers['Authorization'] = f'token {self.github_client.github_token}'
-            print("✅ Using GitHub token for higher rate limits")
-        else:
-            print("⚠️  No GitHub token found - using unauthenticated requests (lower rate limits)")
         
         try:
             response = requests.get(url, params=params, headers=headers, timeout=30)
@@ -150,24 +191,28 @@ class GitHubRepoScanner:
         repo_url = repo_info['html_url']
         repo_name = repo_info['full_name']
         
-        print("\n" + "=" * 50)
-        print(f"ANALYZING REPOSITORY: {repo_name}")
-        print(f"URL: {repo_url}")
-        print(f"Description: {repo_info['description']}")
-        print(f"Language: {repo_info['language']} | Stars: {repo_info['stars']}")
-        print("=" * 50)
+        print(f"📊 Analyzing {repo_name}...")
         
         analysis_result = {
             'repository': repo_info,
             'analysis_timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
             'security_findings': {
                 'base44_detected': False,
+                'base44_project_id': None,
                 'secrets_found': False,
+                'secrets_details': [],
                 'http_urls_found': False,
+                'http_details': [],
                 'https_issues_found': False,
+                'https_details': [],
                 'password_vulnerabilities': False,
+                'password_details': [],
                 'idor_vulnerabilities': False,
-                'integrations_found': False
+                'idor_details': [],
+                'integrations_found': False,
+                'integrations_details': [],
+                'anonymous_access_vulnerabilities': False,
+                'anonymous_access_details': []
             },
             'errors': [],
             'analysis_completed': False
@@ -177,20 +222,45 @@ class GitHubRepoScanner:
             # Run security orchestrator
             orchestrator = SecurityOrchestrator(repo_url, self.bearer_token)
             
-            # We'll capture the output by modifying the orchestrator slightly
-            # For now, let's run it and capture what we can
-            print("\n🚀 Starting security analysis...")
-            
             # Check if it's a Base44 project
             is_base44 = orchestrator.run_base44_check()
-            analysis_result['security_findings']['base44_detected'] = is_base44
             
-            # Run static analysis
-            orchestrator.run_static_analysis()
-            
-            # Run authenticated analysis if token provided
-            if self.bearer_token:
+            # If not a Base44 project, skip all other security checks
+            if not is_base44:
+                print("   Skipping Base44-specific checks")
+                analysis_result['analysis_completed'] = True
+            else:
+                # Run static analysis
+                orchestrator.run_static_analysis()
+                
+                # Run anonymous access check first
+                orchestrator.run_anonymous_access_check()
+                
+                # Run authenticated analysis if token provided OR if anonymous access is detected
                 orchestrator.run_authenticated_analysis()
+            
+            # Get all findings from the orchestrator
+            findings = orchestrator.get_findings()
+            
+            # Update analysis result with actual findings
+            analysis_result['security_findings'] = {
+                'base44_detected': findings.get('base44_detected', False),
+                'base44_project_id': findings.get('base44_project_id'),
+                'secrets_found': findings.get('secrets_found', False),
+                'secrets_details': findings.get('secrets_details', []),
+                'http_urls_found': findings.get('http_urls_found', False),
+                'http_details': findings.get('http_details', []),
+                'https_issues_found': findings.get('https_issues_found', False),
+                'https_details': findings.get('https_details', []),
+                'password_vulnerabilities': findings.get('password_vulnerabilities', False),
+                'password_details': findings.get('password_details', []),
+                'idor_vulnerabilities': findings.get('idor_vulnerabilities', False),
+                'idor_details': findings.get('idor_details', []),
+                'integrations_found': findings.get('integrations_found', False),
+                'integrations_details': findings.get('integrations_details', []),
+                'anonymous_access_vulnerabilities': findings.get('anonymous_access_vulnerabilities', False),
+                'anonymous_access_details': findings.get('anonymous_access_details', [])
+            }
             
             analysis_result['analysis_completed'] = True
             
@@ -198,6 +268,9 @@ class GitHubRepoScanner:
             error_msg = f"Error analyzing repository {repo_name}: {e}"
             print(f"❌ {error_msg}")
             analysis_result['errors'].append(error_msg)
+        
+        # Save the analysis result to a file
+        self._save_repo_result(analysis_result)
         
         return analysis_result
 
@@ -215,19 +288,14 @@ class GitHubRepoScanner:
             print("❌ No repositories to analyze. Exiting.")
             return []
         
-        print(f"\n📋 REPOSITORIES TO ANALYZE:")
-        for i, repo in enumerate(repositories, 1):
-            print(f"{i:2d}. {repo['full_name']} ({repo['stars']} ⭐) - {repo['language']}")
-            print(f"     {repo['description'][:100]}{'...' if len(repo['description']) > 100 else ''}")
-        
         # Analyze each repository
         results = []
         for i, repo in enumerate(repositories, 1):
-            print(f"\n📊 PROGRESS: Analyzing repository {i}/{len(repositories)}")
+            if len(repositories) > 1:
+                print(f"\n[{i}/{len(repositories)}]", end=" ")
             
             # Add small delay to avoid hitting rate limits
             if i > 1:
-                print("⏳ Waiting 2 seconds to avoid rate limits...")
                 time.sleep(2)
             
             result = self.analyze_repository(repo)
@@ -242,42 +310,27 @@ class GitHubRepoScanner:
         Args:
             results: List of analysis results
         """
-        print("\n" + "=" * 50)
-        print("SECURITY ANALYSIS SUMMARY REPORT")
-        print("=" * 50)
-
         if not results:
             print("❌ No results to summarize.")
             return
         
         total_repos = len(results)
-        completed_analyses = sum(1 for r in results if r['analysis_completed'])
         base44_repos = sum(1 for r in results if r['security_findings']['base44_detected'])
         
-        print(f"📈 OVERALL STATISTICS:")
-        print(f"   • Total repositories analyzed: {total_repos}")
-        print(f"   • Successful analyses: {completed_analyses}")
-        print(f"   • Base44 projects detected: {base44_repos}")
+        print(f"\n� Summary: {total_repos} repositories analyzed, {base44_repos} Base44 projects found")
+        print(f"💾 Results saved to {self.results_folder}/ directory")
         
-        print(f"\n📋 DETAILED RESULTS:")
         for i, result in enumerate(results, 1):
             repo = result['repository']
             findings = result['security_findings']
+            sanitized_name = self._sanitize_filename(repo['full_name'])
             
-            print(f"\n{i:2d}. {repo['full_name']}")
-            print(f"    URL: {repo['html_url']}")
-            print(f"    Analysis Status: {'✅ Completed' if result['analysis_completed'] else '❌ Failed'}")
-            
-            if result['analysis_completed']:
-                print(f"    Base44 Project: {'✅ Yes' if findings['base44_detected'] else '❌ No'}")
+            status_icon = "✅" if findings['base44_detected'] else "❌"
+            print(f"   {status_icon} {repo['full_name']} → {sanitized_name}_analysis.json")
             
             if result['errors']:
-                print(f"    Errors: {len(result['errors'])}")
                 for error in result['errors']:
-                    print(f"      - {error}")
-
-        print(f"\n🔍 SEARCH QUERY: '{self.search_query}'")
-        print(f"📅 ANALYSIS DATE: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    print(f"      ⚠️ {error}")
 
 
 def main():
@@ -298,6 +351,8 @@ The script performs comprehensive security analysis including:
 - Password vulnerability detection (with token)
 - IDOR vulnerability detection (with token)
 - Integration analysis (with token)
+
+Results are saved individually for each repository as JSON files in the 'repo-scanner-results' folder.
         """
     )
     
@@ -320,12 +375,7 @@ The script performs comprehensive security analysis including:
             print("Analysis cancelled.")
             sys.exit(0)
     
-    print("🔍 GitHub Repository Security Scanner")
-    print("=" * 50)
-    print(f"Search Query: '{args.search}'")
-    print(f"Repository Limit: {args.limit}")
-    print(f"Bearer Token: {'Provided' if args.token else 'Not provided'}")
-    print("=" * 50)
+    print(f"🔍 Scanning GitHub repositories for '{args.search}' (limit: {args.limit})")
     
     # Create scanner and run analysis
     scanner = GitHubRepoScanner(search_query=args.search, limit=args.limit, bearer_token=args.token)

@@ -88,7 +88,7 @@ class HTTPSDetector:
         # Check SSL certificate
         ssl_result = self.check_ssl_certificate(hostname, port)
         
-        # Handle SSL verification errors (like the original url_detector)
+        # Handle SSL verification errors
         if isinstance(ssl_result, str):
             # SSL error occurred
             issues.append(self.create_ssl_issue(
@@ -268,10 +268,9 @@ class HTTPSDetector:
                 return all_issues
             
         except Exception as e:
-            print(f"❌ Error during HTTPS analysis: {str(e)}")
             return []
     
-    def print_results(self, repo_url: str, issues: List[Dict]):
+    def print_results(self, issues: List[Dict]):
         """Print analysis results"""
         if not issues:
             print("✅ No HTTPS/SSL security issues detected")
@@ -322,7 +321,7 @@ def main():
     issues = detector.detect_https_security_issues(args.repo_url)
     
     # Print results
-    detector.print_results(args.repo_url, issues)
+    detector.print_results(issues)
     
     # Exit with appropriate code
     if issues:

@@ -65,33 +65,30 @@ class PasswordDetector:
             entities_columns = self.app.get_entities_columns()
             
             if not isinstance(entities_columns, dict):
-                print("Error: Failed to retrieve entities and columns")
                 return
             
             if not entities_columns:
-                print("Warning: No entities found in the project")
                 return
         
             for entity, columns in entities_columns.items():
                 try:
                     if not isinstance(columns, list):
-                        print(f"Warning: Invalid column data for entity {entity}")
                         continue
                         
                     if self.check_password_columns(columns):
                         self.tables_with_passwords.append(entity)
                 except Exception as e:
-                    print(f"Error checking entity {entity}: {e}")
                     continue
-        
-            if self.tables_with_passwords:
-                print(f"🚨 Found password storage vulnerabilities in tables: {', '.join(self.tables_with_passwords)}")
-            else:
-                print("✅ No password storage vulnerabilities detected")
                 
         except Exception as e:
-            print(f"Error during password vulnerability detection: {e}")
             raise
+
+    def print_results(self) -> None:
+        """Print the password vulnerability detection results"""
+        if hasattr(self, 'tables_with_passwords') and self.tables_with_passwords:
+            print(f"🚨 Found password storage vulnerabilities in tables: {', '.join(self.tables_with_passwords)}")
+        else:
+            print("✅ No password storage vulnerabilities detected")
 
 
 def main():
@@ -110,6 +107,7 @@ def main():
         # Create detector and run analysis
         detector = PasswordDetector(args.token, args.repo_url)
         detector.detect_password_vulnerabilities()
+        detector.print_results()
         
         # Exit with appropriate code
         if detector.tables_with_passwords:

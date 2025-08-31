@@ -132,10 +132,9 @@ class HTTPDetector:
                 return all_issues
             
         except Exception as e:
-            print(f"❌ Error during HTTP analysis: {str(e)}")
             return []
     
-    def print_results(self, repo_url: str, issues: List[Dict]):
+    def print_results(self, issues: List[Dict]):
         """Print analysis results"""
         if not issues:
             print("✅ No insecure HTTP URLs detected")
@@ -190,7 +189,7 @@ def main():
         issues = detector.detect_http_security_issues(args.repo_url)
         
         # Print results
-        detector.print_results(args.repo_url, issues)
+        detector.print_results(issues)
         
         # Exit with appropriate code
         if issues:

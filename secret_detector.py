@@ -117,7 +117,6 @@ class SecretDetector:
         """Main method to detect secrets in the repository"""
         try:
             if not repo_url or not isinstance(repo_url, str):
-                print("Error: Invalid repository URL provided")
                 return []
                 
             owner, repo = self.github_client.parse_github_url(repo_url)
@@ -125,14 +124,12 @@ class SecretDetector:
             # Download repository locally using context manager
             with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
                 if not repo_manager:
-                    print("Error: Failed to download repository")
                     return []
                 
                 # Get ALL files from local repository (not just code files)
                 all_files = repo_manager.find_files()
                 
                 if not all_files:
-                    print("Warning: No files found in repository")
                     return []
                 
                 # Scan each file
@@ -144,19 +141,16 @@ class SecretDetector:
                         if secrets:
                             all_secrets.extend(secrets)
                     except Exception as e:
-                        print(f"⚠️  Error scanning {relative_path}: {e}")
                         continue
                 
                 return all_secrets
             
         except ValueError as e:
-            print(f"❌ Invalid repository URL: {e}")
             return []
         except Exception as e:
-            print(f"❌ Error analyzing repository: {e}")
             return []
     
-    def print_results(self, repo_url: str, secrets: List[Dict]):
+    def print_results(self, secrets: List[Dict]):
         """Print analysis results"""
         if not secrets:
             print("✅ No hardcoded secrets detected")
@@ -206,7 +200,7 @@ def main():
         secrets = detector.detect_secrets(args.repo_url)
         
         # Print results
-        detector.print_results(args.repo_url, secrets)
+        detector.print_results(secrets)
         
         # Exit with appropriate code
         if secrets:

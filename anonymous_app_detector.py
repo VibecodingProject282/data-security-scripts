@@ -44,27 +44,22 @@ class AnonymousAppDetector:
             self.accessible_entities = []
             
         except Exception as e:
-            print(f"Error initializing AnonymousAppDetector: {e}")
             raise
     
     def detect_anonymous_access(self) -> None:
         """Main method to detect anonymous access vulnerabilities"""
         try:
-            print(f"🔍 Checking anonymous access for app: {self.app.project_id}")
-
             # Try to get entities without authentication
             response = self.app.get_base44_entities()
 
             if not isinstance(response, list):
                 if isinstance(response, dict) and response.get("error_code") == 403:  # Forbidden
-                    print("✅ No anonymous access detected")
+                    return  # No anonymous access
                 else:  # if it failed with a different error
-                    print("An Error occurred While fetching entities")
-                return
+                    return
             
             entities = response
             if not entities:
-                print("Warning: No entities found in the project")
                 return
                 
             # Check each entity for data access
@@ -72,19 +67,20 @@ class AnonymousAppDetector:
                 try:
                     if self.app.check_base44_table_has_data(entity):
                         self.accessible_entities.append(entity)
-                        print(f"🚨 Entity '{entity}' allows anonymous data access")
                 except Exception as e:
-                    print(f"Warning: Error checking entity {entity}: {e}")
                     continue
-            
-            if self.accessible_entities:
-                print(f"\n🚨 Anonymous access vulnerability: {len(self.accessible_entities)} entities with accessible data")
-            else:
-                print("✅ No entities with anonymous data access found")
                 
         except Exception as e:
-            print(f"Error during anonymous access detection: {e}")
             raise
+
+    def print_results(self) -> None:
+        """Print the anonymous access detection results"""
+        if hasattr(self, 'accessible_entities') and self.accessible_entities:
+            print(f"🚨 Anonymous access vulnerability: {len(self.accessible_entities)} entities with accessible data")
+            for entity in self.accessible_entities:
+                print(f"🚨 Entity '{entity}' allows anonymous data access")
+        else:
+            print("✅ No anonymous access detected")
 
 
 def main():
@@ -101,7 +97,9 @@ def main():
     try:
         # Create detector and run analysis
         detector = AnonymousAppDetector(args.repo_url)
+        print(f"🔍 Checking anonymous access for app: {detector.app.project_id}")
         detector.detect_anonymous_access()
+        detector.print_results()
         
         # Exit with appropriate code
         if detector.accessible_entities:

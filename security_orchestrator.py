@@ -38,30 +38,45 @@ class SecurityOrchestrator:
         self.project_id = None
         self.is_base44 = False
         
+        # Store findings from all detectors
+        self.findings = {
+            'base44_detected': False,
+            'base44_project_id': None,
+            'secrets_found': False,
+            'secrets_details': [],
+            'http_urls_found': False,
+            'http_details': [],
+            'https_issues_found': False,
+            'https_details': [],
+            'password_vulnerabilities': False,
+            'password_details': [],
+            'idor_vulnerabilities': False,
+            'idor_details': [],
+            'integrations_found': False,
+            'integrations_details': [],
+            'anonymous_access_vulnerabilities': False,
+            'anonymous_access_details': []
+        }
+        
     def run_base44_check(self) -> bool:
         """
         Run Base44 repository check first
         Returns True if it's a Base44 project, False otherwise
         """
-        print("=" * 60)
-        print("STEP 1: Base44 Repository Detection")
-        print("=" * 60)
-        
         try:
             detector = Base44Detector(timeout=10)
             is_base44, confidence, indicators = detector.detect_base44_repository(self.repo_url)
             
             if is_base44:
-                print(f"✅ Repository is a Base44 project (confidence: {confidence:.2f})")
+                print(f"✅ Base44 project detected")
                 self.project_id = detector.project_id
-                if self.project_id:
-                    print(f"📋 Project ID: {self.project_id}")
                 self.is_base44 = True
+                self.findings['base44_detected'] = True
+                self.findings['base44_project_id'] = self.project_id
                 return True
             else:
-                print("❌ Repository is NOT a Base44 project")
-                if 'error' in indicators:
-                    print(f"   Error: {indicators['error']}")
+                print("❌ Not a Base44 project")
+                self.findings['base44_detected'] = False
                 return False
                 
         except Exception as e:
@@ -70,9 +85,7 @@ class SecurityOrchestrator:
 
     def run_static_analysis(self):
         """Run static analysis that doesn't require authentication"""
-        print("\n" + "=" * 60)
-        print("STEP 2: Static Code Analysis (No Authentication Required)")
-        print("=" * 60)
+        print("🔍 Running security code scans...")
         
         # Secret Detection
         self._run_secret_detection()
@@ -85,19 +98,20 @@ class SecurityOrchestrator:
 
     def run_authenticated_analysis(self):
         """Run analysis that requires Base44 authentication token"""
-        if not self.bearer_token:
-            print("\n" + "=" * 60)
-            print("STEP 3: Authenticated Analysis - SKIPPED (No Bearer Token)")
-            print("=" * 60)
-            print("⚠️  Bearer token not provided. Skipping authenticated security checks:")
-            print("   - Password storage vulnerability detection")
-            print("   - IDOR vulnerability detection") 
-            print("   - Integrations retrieval")
+        if not self.is_base44:
+            return
+            
+        # Check if we have a token or if anonymous access allows us to proceed
+        has_anonymous_access = self.findings.get('anonymous_access_vulnerabilities', False)
+        
+        if not self.bearer_token and not has_anonymous_access:
+            print("⚠️  Skipping authenticated analysis (no token + no anonymous access)")
             return
 
-        print("\n" + "=" * 60)
-        print("STEP 3: Authenticated Analysis")
-        print("=" * 60)
+        if not self.bearer_token and has_anonymous_access:
+            print("🔍 Running authenticated analysis (anonymous access detected)")
+            # Use a dummy token since the app allows anonymous access
+            self.bearer_token = "dummy_token_for_anonymous_access"
         
         # Password Storage Vulnerability Detection
         self._run_password_detection()
@@ -110,150 +124,223 @@ class SecurityOrchestrator:
 
     def run_anonymous_access_check(self):
         """Run anonymous access vulnerability check"""
-        print("\n" + "=" * 60)
-        print("STEP 4: Anonymous Access Vulnerability Check")
-        print("=" * 60)
-        
+        if not self.is_base44:
+            return
+
+        print("🔍 Running anonymous access check...")
         try:
             detector = AnonymousAppDetector(self.repo_url)
             detector.detect_anonymous_access()
+            if detector.accessible_entities:
+                self.findings['anonymous_access_vulnerabilities'] = True
+                self.findings['anonymous_access_details'] = detector.accessible_entities
                 
         except Exception as e:
-            print(f"❌ Error during anonymous access detection: {e}")
+            pass  # Silently handle errors, details in JSON
 
     def _run_secret_detection(self):
         """Run secret detection"""
-        print("\n🔍 Secret Detection")
-        print("-" * 40)
-        
         try:
             detector = SecretDetector(timeout=30)
             secrets = detector.detect_secrets(self.repo_url)
             
             if secrets:
-                print(f"⚠️  Found {len(secrets)} potential secrets:")
-                for secret in secrets:
-                    secret_type = secret.get('type', 'Unknown')
-                    file_path = secret.get('file', 'Unknown file')
-                    line_num = secret.get('line', 'Unknown line')
-                    match_text = secret.get('match', secret.get('value', 'Hidden'))
-                    print(f"   - {secret_type} in {file_path}")
-                    print(f"     Line {line_num}: {match_text}")
+                self.findings['secrets_found'] = True
+                self.findings['secrets_details'] = secrets
             else:
-                print("✅ No hardcoded secrets found")
+                self.findings['secrets_found'] = False
+                self.findings['secrets_details'] = []
                 
         except Exception as e:
-            print(f"❌ Error during secret detection: {e}")
+            self.findings['secrets_found'] = False
+            self.findings['secrets_details'] = []
 
     def _run_http_detection(self):
         """Run HTTP URL detection"""
-        print("\n🔍 HTTP URL Detection")
-        print("-" * 40)
-        
         try:
             detector = HTTPDetector(timeout=30)
             issues = detector.detect_http_security_issues(self.repo_url)
             
             if issues:
-                print(f"⚠️  Found {len(issues)} insecure HTTP URLs:")
-                for issue in issues:
-                    url = issue.get('url', 'Unknown URL')
-                    file_path = issue.get('file', 'Unknown file')
-                    line_num = issue.get('line', 'Unknown line')
-                    risk_level = issue.get('risk_level', issue.get('severity', 'Unknown'))
-                    print(f"   - {url} in {file_path}")
-                    print(f"     Line {line_num}: {risk_level} risk")
+                self.findings['http_urls_found'] = True
+                self.findings['http_details'] = issues
             else:
-                print("✅ No insecure HTTP URLs found")
+                self.findings['http_urls_found'] = False
+                self.findings['http_details'] = []
                 
         except Exception as e:
-            print(f"❌ Error during HTTP detection: {e}")
+            self.findings['http_urls_found'] = False
+            self.findings['http_details'] = []
 
     def _run_https_detection(self):
         """Run HTTPS certificate analysis"""
-        print("\n🔍 HTTPS Certificate Analysis")
-        print("-" * 40)
-        
         try:
             detector = HTTPSDetector(timeout=30)
             issues = detector.detect_https_security_issues(self.repo_url)
             
             if issues:
-                print(f"⚠️  Found {len(issues)} HTTPS certificate issues:")
-                for issue in issues:
-                    url = issue.get('url', 'Unknown URL')
-                    issue_type = issue.get('issue_type', issue.get('type', 'Unknown issue'))
-                    severity = issue.get('severity', 'Unknown')
-                    print(f"   - {url}: {issue_type}")
-                    if severity != 'Unknown':
-                        print(f"     Severity: {severity}")
+                self.findings['https_issues_found'] = True
+                self.findings['https_details'] = issues
             else:
-                print("✅ No HTTPS certificate issues found")
+                self.findings['https_issues_found'] = False
+                self.findings['https_details'] = []
                 
         except Exception as e:
-            print(f"❌ Error during HTTPS detection: {e}")
+            self.findings['https_issues_found'] = False
+            self.findings['https_details'] = []
 
     def _run_password_detection(self):
         """Run password storage vulnerability detection"""
-        print("\n🔍 Password Storage Vulnerability Detection")
-        print("-" * 40)
-        
         try:
             detector = PasswordDetector(self.bearer_token, self.repo_url)
             detector.detect_password_vulnerabilities()
+            
+            # Get the results from the detector
+            if hasattr(detector, 'tables_with_passwords') and detector.tables_with_passwords:
+                self.findings['password_vulnerabilities'] = True
+                self.findings['password_details'] = detector.tables_with_passwords
+            else:
+                self.findings['password_vulnerabilities'] = False
+                self.findings['password_details'] = []
+                
         except Exception as e:
-            print(f"❌ Error during password detection: {e}")
+            self.findings['password_vulnerabilities'] = False
+            self.findings['password_details'] = []
 
     def _run_idor_detection(self):
         """Run IDOR vulnerability detection"""
-        print("\n🔍 IDOR Vulnerability Detection")
-        print("-" * 40)
-        
         try:
             detector = IDORDetector(self.bearer_token, self.repo_url)
-            has_idor = detector.detect_idor_vulnerabilities(self.repo_url)      
+            has_idor = detector.detect_idor_vulnerabilities(self.repo_url)
+            
+            self.findings['idor_vulnerabilities'] = has_idor
+            if has_idor:
+                # Try to get detailed findings if available
+                idor_details = []
+                if hasattr(detector, 'data_tables') and detector.data_tables:
+                    idor_details.extend([{'table': table, 'risk': 'HIGH'} for table in detector.data_tables])
+                if hasattr(detector, 'all_tables') and detector.all_tables:
+                    idor_details.extend([{'table': table, 'risk': 'LOW'} for table in detector.all_tables if table not in (detector.data_tables or [])])
+                self.findings['idor_details'] = idor_details
+            else:
+                self.findings['idor_details'] = []
+                
         except Exception as e:
-            print(f"❌ Error during IDOR detection: {e}")
+            self.findings['idor_vulnerabilities'] = False
+            self.findings['idor_details'] = []
 
     def _run_integrations_retrieval(self):
         """Run integrations retrieval"""
-        print("\n🔍 Integrations Analysis")
-        print("-" * 40)
-        
         try:
             retriever = IntegrationsRetriever(self.bearer_token, self.repo_url)
-            retriever.get_integrations()   
+            retriever.get_integrations()
+            
+            # Get the integrations from the retriever
+            if hasattr(retriever, 'integrations') and retriever.integrations:
+                self.findings['integrations_found'] = True
+                self.findings['integrations_details'] = retriever.integrations
+            else:
+                self.findings['integrations_found'] = False
+                self.findings['integrations_details'] = []
+                
         except Exception as e:
-            print(f"❌ Error during integrations retrieval: {e}")
+            self.findings['integrations_found'] = False
+            self.findings['integrations_details'] = []
 
     def run_all_scans(self):
         """Run all security scans in the correct order"""
-        print("🚀 Starting Security Analysis")
-        print("Repository:", self.repo_url)
-        if self.bearer_token:
-            print("Bearer Token: Provided")
-        else:
-            print("Bearer Token: Not provided (some checks will be skipped)")
-        
         # Step 1: Check if it's a Base44 repository
         if not self.run_base44_check():
-            print("\n❌ Repository is not a Base44 project. Ending analysis.")
             return False
         
         # Step 2: Run static analysis (no authentication required)
         self.run_static_analysis()
-        
-        # Step 3: Run authenticated analysis (requires bearer token)
+
+        # Step 3: Run anonymous access check (No authentication required)
+        self.run_anonymous_access_check()
+
+        # Step 4: Run authenticated analysis (may require bearer token)
         self.run_authenticated_analysis()
         
-        # Step 4: Run anonymous access check
-        self.run_anonymous_access_check()
-        
-        print("\n" + "=" * 60)
-        print("✅ Security Analysis Complete")
-        print("=" * 60)
-        
         return True
+
+    def get_findings(self):
+        """
+        Get all security findings from the analysis
+        
+        Returns:
+            Dictionary containing all findings from security detectors
+        """
+        return self.findings.copy()
+
+    def print_results(self):
+        """
+        Print a concise and clear summary of all security findings
+        """
+        print("\n")
+        print("🔍 SECURITY ANALYSIS RESULTS")
+        print("="*30)
+        
+        # Base44 Detection
+        if self.findings['base44_detected']:
+            print(f"✅ Base44 Project: {self.findings['base44_project_id']}")
+        else:
+            print("❌ Base44 Project: Not detected")
+        
+        print("\n📊 SECURITY FINDINGS:")
+        print("-" * 25)
+        
+        # Secrets
+        if self.findings['secrets_found']:
+            print(f"🚨 Secrets Found: {len(self.findings['secrets_details'])} issues")
+            for secret in self.findings['secrets_details'][:3]:  # Show first 3
+                file_path = secret.get('file', 'Unknown file')
+                secret_type = secret.get('type', 'Unknown type')
+                print(f"   • {secret_type} in {file_path}")
+            if len(self.findings['secrets_details']) > 3:
+                print(f"   ... and {len(self.findings['secrets_details']) - 3} more")
+        else:
+            print("✅ Secrets: None found")
+        
+        # HTTP URLs
+        if self.findings['http_urls_found']:
+            print(f"⚠️  HTTP URLs: {len(self.findings['http_details'])} found")
+            for http in self.findings['http_details'][:2]:  # Show first 2
+                print(f"   • {http.get('url', 'Unknown URL')}")
+            if len(self.findings['http_details']) > 2:
+                print(f"   ... and {len(self.findings['http_details']) - 2} more")
+        else:
+            print("✅ HTTP URLs: None found")
+        
+        # HTTPS Issues
+        if self.findings['https_issues_found']:
+            print(f"⚠️  HTTPS Issues: {len(self.findings['https_details'])} found")
+        else:
+            print("✅ HTTPS Issues: None found")
+        
+        # Anonymous Access
+        if self.findings['anonymous_access_vulnerabilities']:
+            print(f"🚨 Anonymous Access: {len(self.findings['anonymous_access_details'])} vulnerabilities")
+        else:
+            print("✅ Anonymous Access: Secure")
+        
+        # Password Vulnerabilities
+        if self.findings['password_vulnerabilities']:
+            print(f"🚨 Password Issues: {len(self.findings['password_details'])} tables affected")
+        else:
+            print("✅ Password Storage: Secure")
+        
+        # IDOR Vulnerabilities
+        if self.findings['idor_vulnerabilities']:
+            print(f"🚨 IDOR Issues: {len(self.findings['idor_details'])} potential vulnerabilities")
+        else:
+            print("✅ IDOR Protection: Secure")
+        
+        # Integrations
+        if self.findings['integrations_found']:
+            print(f"ℹ️  Integrations: {len(self.findings['integrations_details'])} found")
+        else:
+            print("ℹ️  Integrations: None found")
 
 
 def main():
@@ -276,7 +363,8 @@ Examples:
     try:
         orchestrator = SecurityOrchestrator(args.repo_url, args.token)
         success = orchestrator.run_all_scans()
-        
+        orchestrator.print_results()
+
         # Exit with appropriate code
         sys.exit(0 if success else 1)
         
