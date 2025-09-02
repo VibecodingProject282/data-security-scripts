@@ -122,9 +122,7 @@ class Base44Detector:
             
             # Calculate confidence (simple average of indicators)
             confidence = sum(indicators.values()) / len(indicators)
-            
-            # Consider it Base44 if at least 1 indicator is present
-            is_base44 = confidence > 0.1
+            is_base44 = indicators['has_base44_client']
             
             return is_base44, confidence, indicators
             

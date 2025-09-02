@@ -97,7 +97,7 @@ class IDORDetector:
                 
                 # Return tables that are NOT referenced in frontend
                 high_risk_tables = [table for table in data_tables if table not in referenced_tables]
-                low_risk_tables = [table for table in all_tables if table not in referenced_tables and table not in high_risk_tables]
+                low_risk_tables = [table for table in all_tables if table not in high_risk_tables]
                 return high_risk_tables, low_risk_tables
 
         except Exception as e:
@@ -123,7 +123,7 @@ class IDORDetector:
         if hasattr(self, 'high_risk_tables') and self.high_risk_tables:
             print(f"\n🚨 HIGH IDOR risk tables: {', '.join(self.high_risk_tables)}")
         if hasattr(self, 'low_risk_tables') and self.low_risk_tables:
-            print(f"\n⚠️  LOW IDOR risk tables: {', '.join(self.low_risk_tables)}")
+            print(f"⚠️  LOW IDOR risk tables: {', '.join(self.low_risk_tables)}")
         
         # If no risks found, show success message
         if not (hasattr(self, 'high_risk_tables') and self.high_risk_tables) and not (hasattr(self, 'low_risk_tables') and self.low_risk_tables):

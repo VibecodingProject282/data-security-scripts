@@ -217,10 +217,10 @@ class SecurityOrchestrator:
             if has_idor:
                 # Try to get detailed findings if available
                 idor_details = []
-                if hasattr(detector, 'data_tables') and detector.data_tables:
-                    idor_details.extend([{'table': table, 'risk': 'HIGH'} for table in detector.data_tables])
-                if hasattr(detector, 'all_tables') and detector.all_tables:
-                    idor_details.extend([{'table': table, 'risk': 'LOW'} for table in detector.all_tables if table not in (detector.data_tables or [])])
+                if hasattr(detector, 'high_risk_tables') and detector.high_risk_tables:
+                    idor_details.extend([{'table': table, 'risk': 'HIGH'} for table in detector.high_risk_tables])
+                if hasattr(detector, 'low_risk_tables') and detector.low_risk_tables:
+                    idor_details.extend([{'table': table, 'risk': 'LOW'} for table in detector.low_risk_tables])
                 self.findings['idor_details'] = idor_details
             else:
                 self.findings['idor_details'] = []

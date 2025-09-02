@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
 """
-GitHub Repository Security Scanner
-
-This script searches GitHub for public repositories based on a given search string
-and performs comprehensive security analysis on each repository found.
-
-Usage:
-    python github_repo_scanner.py --search "search_term" [--limit NUMBER] [--token BEARER_TOKEN]
-
-Example:
-    python github_repo_scanner.py --search "react app" --limit 10
-    python github_repo_scanner.py --search "express server" --limit 5 --token your_bearer_token
-
 The script will:
 1. Search GitHub for public repositories matching the search term
 2. For each repository found:
@@ -19,7 +7,7 @@ The script will:
    - Run static code analysis (secrets, HTTP URLs, HTTPS certificates)
    - Run authenticated analysis if bearer token provided (passwords, IDOR, integrations)
 3. Generate a comprehensive security report
-4. Save individual analysis results as JSON files in the 'repo-scanner-results' folder
+4. Save individual analysis results as CSV file in the 'repo-scanner-results' folder
 """
 
 import sys
@@ -28,6 +16,7 @@ import requests
 import time
 import json
 import os
+import csv
 from typing import List, Dict, Optional, Any
 from urllib.parse import quote
 
@@ -59,13 +48,47 @@ class GitHubRepoScanner:
         self.github_client = GitHubClient()
         self.results = []
         self.results_folder = "repo-scanner-results"
+        self.csv_filename = "security_analysis_results.csv"
         self._ensure_results_directory()
+        self._initialize_csv_file()
         
     def _ensure_results_directory(self):
         """Create the results directory if it doesn't exist"""
         if not os.path.exists(self.results_folder):
             os.makedirs(self.results_folder)
             print(f"✅ Created results directory: {self.results_folder}")
+            
+    def _initialize_csv_file(self):
+        """Initialize CSV file with headers if it doesn't exist"""
+        csv_path = os.path.join(self.results_folder, self.csv_filename)
+        
+        # Define CSV headers according to requirements
+        headers = [
+            'URL',
+            'analysis_timestamp', 
+            'is_base44',
+            'project_id',
+            'secret_count',
+            'http_count',
+            'https_count',
+            'password_vulnerability',
+            'idor_tables_low',
+            'idor_tables_high',
+            'integration_count',
+            'anonymous_access',
+            'anonymous_tables'
+        ]
+        
+        # Check if file exists and has headers
+        file_exists = os.path.exists(csv_path)
+        if not file_exists:
+            try:
+                with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(headers)
+                print(f"✅ Initialized CSV file: {self.csv_filename}")
+            except Exception as e:
+                print(f"❌ Error initializing CSV file: {e}")
         
     def _sanitize_filename(self, repo_name: str) -> str:
         """
@@ -85,24 +108,65 @@ class GitHubRepoScanner:
         sanitized = sanitized.replace('|', '_')
         return sanitized
         
-    def _save_repo_result(self, analysis_result: Dict[str, Any]):
+    def _save_repo_result_to_csv(self, analysis_result: Dict[str, Any]):
         """
-        Save individual repository analysis result to a file
+        Append repository analysis result to CSV file
         
         Args:
             analysis_result: Dictionary containing the complete analysis results
         """
-        repo_name = analysis_result['repository']['full_name']
-        sanitized_name = self._sanitize_filename(repo_name)
-        filename = f"{sanitized_name}_analysis.json"
-        filepath = os.path.join(self.results_folder, filename)
+        csv_path = os.path.join(self.results_folder, self.csv_filename)
         
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(analysis_result, f, indent=2, ensure_ascii=False)
-            print(f"   Saved to {filename}")
+            repo_info = analysis_result['repository']
+            findings = analysis_result['security_findings']
+            
+            # Count IDOR vulnerabilities by risk level
+            idor_low = 0
+            idor_high = 0
+            if findings.get('idor_details'):
+                for detail in findings['idor_details']:
+                    if detail.get('risk', '').upper() == 'HIGH':
+                        idor_high += 1
+                    elif detail.get('risk', '').upper() == 'LOW':
+                        idor_low += 1
+            
+            # Prepare CSV row data
+            row_data = [
+                repo_info.get('clone_url', ''),  # URL
+                analysis_result.get('analysis_timestamp', ''),  # analysis_timestamp
+                findings.get('base44_detected', False),  # is_base44
+                findings.get('base44_project_id', ''),  # project_id (nullable)
+                len(findings.get('secrets_details', [])),  # secret_count
+                len(findings.get('http_details', [])),  # http_count
+                len(findings.get('https_details', [])),  # https_count
+                findings.get('password_vulnerabilities', False),  # password_vulnerability
+                idor_low,  # idor_tables_low
+                idor_high,  # idor_tables_high
+                len(findings.get('integrations_details', [])),  # integration_count
+                findings.get('anonymous_access_vulnerabilities', False),  # anonymous_access
+                len(findings.get('anonymous_access_details', []))  # anonymous_tables
+            ]
+            
+            # Append to CSV file
+            with open(csv_path, 'a', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(row_data)
+                
+            print(f"   ✅ Added to CSV: {repo_info.get('full_name', 'Unknown')}")
+            
         except Exception as e:
-            print(f"❌ Error saving results for {repo_name}: {e}")
+            print(f"❌ Error saving to CSV: {e}")
+        
+    def _save_repo_result(self, analysis_result: Dict[str, Any]):
+        """
+        Save individual repository analysis result to CSV file
+        
+        Args:
+            analysis_result: Dictionary containing the complete analysis results
+        """
+        # Save to CSV instead of JSON
+        self._save_repo_result_to_csv(analysis_result)
         
     def search_repositories(self) -> List[Dict[str, Any]]:
         """
@@ -352,7 +416,11 @@ The script performs comprehensive security analysis including:
 - IDOR vulnerability detection (with token)
 - Integration analysis (with token)
 
-Results are saved individually for each repository as JSON files in the 'repo-scanner-results' folder.
+Results are appended to a single CSV file 'security_analysis_results.csv' in the 'repo-scanner-results' folder.
+Each repository becomes one row with the following columns:
+URL, analysis_timestamp, is_base44, project_id, secret_count, http_count, https_count,
+password_vulnerability, idor_tables_low, idor_tables_high, integration_count, 
+anonymous_access, anonymous_tables
         """
     )
     
