@@ -305,16 +305,18 @@ class SecurityOrchestrator:
         # HTTP URLs
         if self.findings['http_urls_found']:
             print(f"⚠️  HTTP URLs: {len(self.findings['http_details'])} found")
-            for http in self.findings['http_details'][:2]:  # Show first 2
+            for http in self.findings['http_details']:  # Show first 2
                 print(f"   • {http.get('url', 'Unknown URL')}")
-            if len(self.findings['http_details']) > 2:
-                print(f"   ... and {len(self.findings['http_details']) - 2} more")
         else:
             print("✅ HTTP URLs: None found")
         
         # HTTPS Issues
         if self.findings['https_issues_found']:
             print(f"⚠️  HTTPS Issues: {len(self.findings['https_details'])} found")
+            for issue in self.findings['https_details']:
+                url = issue.get('url', 'Unknown URL')
+                detail = issue.get('detail', '')
+                print(f"   • {url} {('- ' + detail) if detail else ''}")
         else:
             print("✅ HTTPS Issues: None found")
         

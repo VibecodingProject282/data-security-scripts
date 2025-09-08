@@ -48,7 +48,9 @@ class GitHubRepoScanner:
         self.github_client = GitHubClient()
         self.results = []
         self.results_folder = "repo-scanner-results"
-        self.csv_filename = "security_analysis_results.csv"
+        # Generate unique CSV filename with timestamp for each run
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        self.csv_filename = f"security_analysis_results_{timestamp}.csv"
         self._ensure_results_directory()
         self._initialize_csv_file()
         
@@ -59,7 +61,7 @@ class GitHubRepoScanner:
             print(f"✅ Created results directory: {self.results_folder}")
             
     def _initialize_csv_file(self):
-        """Initialize CSV file with headers if it doesn't exist"""
+        """Initialize CSV file with headers for this run"""
         csv_path = os.path.join(self.results_folder, self.csv_filename)
         
         # Define CSV headers according to requirements
@@ -79,16 +81,14 @@ class GitHubRepoScanner:
             'anonymous_tables'
         ]
         
-        # Check if file exists and has headers
-        file_exists = os.path.exists(csv_path)
-        if not file_exists:
-            try:
-                with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(headers)
-                print(f"✅ Initialized CSV file: {self.csv_filename}")
-            except Exception as e:
-                print(f"❌ Error initializing CSV file: {e}")
+        # Create new CSV file with headers for this run
+        try:
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(headers)
+            print(f"✅ Created new CSV file: {self.csv_filename}")
+        except Exception as e:
+            print(f"❌ Error creating CSV file: {e}")
         
     def _sanitize_filename(self, repo_name: str) -> str:
         """
@@ -180,67 +180,111 @@ class GitHubRepoScanner:
         # Prepare the search URL
         encoded_query = quote(self.search_query)
         url = f"https://api.github.com/search/repositories"
-        params = {
-            'q': self.search_query,
-            'sort': 'stars',  # Sort by stars for more relevant results
-            'order': 'desc',
-            'per_page': min(self.limit, 100),  # GitHub API limit is 100 per page
-            'type': 'Repositories'
-        }
         
         headers = {}
         if self.github_client.github_token:
             headers['Authorization'] = f'token {self.github_client.github_token}'
         
+        all_repositories = []
+        page = 1
+        repos_per_page = 100  # GitHub API maximum per page
+        
         try:
-            response = requests.get(url, params=params, headers=headers, timeout=30)
-            
-            if response.status_code == 403:
-                print("❌ GitHub API rate limit exceeded. Please wait or provide a GitHub token.")
-                return []
-            elif response.status_code == 422:
-                print("❌ Invalid search query. Please check your search terms.")
-                return []
-            elif response.status_code != 200:
-                print(f"❌ GitHub API error: {response.status_code}")
-                print(f"Response: {response.text}")
-                return []
-            
-            data = response.json()
-            repositories = data.get('items', [])
-            
-            if not repositories:
-                print("❌ No repositories found matching your search criteria.")
-                return []
-            
-            print(f"✅ Found {len(repositories)} repositories")
-            
-            # Filter and format the results
-            filtered_repos = []
-            for repo in repositories[:self.limit]:
-                repo_info = {
-                    'name': repo['name'],
-                    'full_name': repo['full_name'],
-                    'html_url': repo['html_url'],
-                    'clone_url': repo['clone_url'],
-                    'description': repo.get('description', 'No description'),
-                    'stars': repo['stargazers_count'],
-                    'language': repo.get('language', 'Unknown'),
-                    'updated_at': repo['updated_at']
-                }
-                filtered_repos.append(repo_info)
+            while len(all_repositories) < self.limit:
+                # Calculate how many repos to request for this page
+                remaining_needed = self.limit - len(all_repositories)
+                current_per_page = min(repos_per_page, remaining_needed)
                 
-            return filtered_repos
+                params = {
+                    'q': self.search_query,
+                    'sort': 'stars',  # Sort by stars for more relevant results
+                    'order': 'desc',
+                    'per_page': current_per_page,
+                    'page': page,
+                    'type': 'Repositories'
+                }
+                
+                # print(f"📄 Fetching page {page} (requesting {current_per_page} repositories)...")
+                
+                response = requests.get(url, params=params, headers=headers, timeout=30)
+                
+                if response.status_code == 403:
+                    print("❌ GitHub API rate limit exceeded. Please wait or provide a GitHub token.")
+                    if len(all_repositories) > 0:
+                        print(f"📊 Returning {len(all_repositories)} repositories found before rate limit.")
+                    return all_repositories
+                elif response.status_code == 422:
+                    print("❌ Invalid search query. Please check your search terms.")
+                    return []
+                elif response.status_code != 200:
+                    print(f"❌ GitHub API error: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    if len(all_repositories) > 0:
+                        print(f"📊 Returning {len(all_repositories)} repositories found before error.")
+                    return all_repositories
+                
+                data = response.json()
+                repositories = data.get('items', [])
+                total_count = data.get('total_count', 0)
+                
+                if not repositories:
+                    break
+                
+                # Filter and format the results for this page
+                for repo in repositories:
+                    if len(all_repositories) >= self.limit:
+                        break
+                        
+                    repo_info = {
+                        'name': repo['name'],
+                        'full_name': repo['full_name'],
+                        'html_url': repo['html_url'],
+                        'clone_url': repo['clone_url'],
+                        'description': repo.get('description', 'No description'),
+                        'stars': repo['stargazers_count'],
+                        'language': repo.get('language', 'Unknown'),
+                        'updated_at': repo['updated_at']
+                    }
+                    all_repositories.append(repo_info)
+                
+                # print(f"✅ Found {len(repositories)} repositories on page {page}")
+                # print(f"📈 GitHub reports {total_count} total repositories match your search")
+                
+                # Check if we've reached the end of available results
+                # if len(repositories) < current_per_page:
+                #     print(f"✅ Reached end of available repositories. Total found: {len(all_repositories)}")
+                #     break
+                
+                # # GitHub API search has a limit of 1000 results total (10 pages of 100)
+                # if page >= 10:
+                #     print(f"⚠️  Reached GitHub API search limit (1000 results max). Total found: {len(all_repositories)}")
+                #     break
+                
+                page += 1
+                
+                # Add a small delay to avoid hitting rate limits too quickly
+                # time.sleep(0.5)
+            
+            if len(all_repositories) == 0:
+                print("❌ No repositories found matching your search criteria.")
+            else:
+                print(f"Search completed! Found {len(all_repositories)} repositories total")
+                
+            return all_repositories
             
         except requests.Timeout:
             print("❌ Request timeout. Please try again.")
-            return []
+            if len(all_repositories) > 0:
+                print(f"📊 Returning {len(all_repositories)} repositories found before timeout.")
+            return all_repositories
         except requests.ConnectionError:
             print("❌ Failed to connect to GitHub API. Check your internet connection.")
-            return []
+            return all_repositories
         except Exception as e:
             print(f"❌ Error searching repositories: {e}")
-            return []
+            if len(all_repositories) > 0:
+                print(f"📊 Returning {len(all_repositories)} repositories found before error.")
+            return all_repositories
 
     def analyze_repository(self, repo_info: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -347,7 +391,6 @@ class GitHubRepoScanner:
         """
         # Search for repositories
         repositories = self.search_repositories()
-        
         if not repositories:
             print("❌ No repositories to analyze. Exiting.")
             return []
@@ -380,21 +423,6 @@ class GitHubRepoScanner:
         
         total_repos = len(results)
         base44_repos = sum(1 for r in results if r['security_findings']['base44_detected'])
-        
-        print(f"\n� Summary: {total_repos} repositories analyzed, {base44_repos} Base44 projects found")
-        print(f"💾 Results saved to {self.results_folder}/ directory")
-        
-        for i, result in enumerate(results, 1):
-            repo = result['repository']
-            findings = result['security_findings']
-            sanitized_name = self._sanitize_filename(repo['full_name'])
-            
-            status_icon = "✅" if findings['base44_detected'] else "❌"
-            print(f"   {status_icon} {repo['full_name']} → {sanitized_name}_analysis.json")
-            
-            if result['errors']:
-                for error in result['errors']:
-                    print(f"      ⚠️ {error}")
 
 
 def main():
@@ -403,25 +431,18 @@ def main():
         description='Search and analyze GitHub repositories for security vulnerabilities',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  python github_repo_scanner.py --search "react app" --limit 10
-  python github_repo_scanner.py --search "express server" --limit 5 --token your_bearer_token
-  python github_repo_scanner.py --search "django project" --limit 3
-
-The script performs comprehensive security analysis including:
-- Base44 project detection
-- Secret detection (API keys, passwords, tokens)
-- HTTP/HTTPS URL analysis
-- Password vulnerability detection (with token)
-- IDOR vulnerability detection (with token)
-- Integration analysis (with token)
-
-Results are appended to a single CSV file 'security_analysis_results.csv' in the 'repo-scanner-results' folder.
-Each repository becomes one row with the following columns:
-URL, analysis_timestamp, is_base44, project_id, secret_count, http_count, https_count,
-password_vulnerability, idor_tables_low, idor_tables_high, integration_count, 
-anonymous_access, anonymous_tables
-        """
+    Examples:
+        python github_repo_scanner.py --search "react app" --limit 10
+        python github_repo_scanner.py --search "express server" --limit 5 --token your_bearer_token
+        python github_repo_scanner.py --search "django project" --limit 3
+    The script performs comprehensive security analysis including:
+    - Base44 project detection
+    - Secret detection (API keys, passwords, tokens)
+    - HTTP/HTTPS URL analysis
+    - Password vulnerability detection (with token)
+    - IDOR vulnerability detection (with token)
+    - Integration analysis (with token)
+    Results are appended to a single CSV file 'security_analysis_results.csv' in the 'repo-scanner-results' folder."""
     )
     
     parser.add_argument('--search', required=True, help='Search term for finding GitHub repositories')
