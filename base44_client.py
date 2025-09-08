@@ -51,7 +51,6 @@ class Base44App:
             print("Error: Failed to connect to Base44 API")
             return {"error_code": 503, "msg": "Connection error"}
         except requests.HTTPError as e:
-            print(f"Error: HTTP {e.response.status_code} - {e.response.reason}")
             try:
                 error_data = e.response.json()
                 return {"error_code": e.response.status_code, "msg": error_data}

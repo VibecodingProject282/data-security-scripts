@@ -34,7 +34,8 @@ def analyze_csv(file_path):
         'repos_with_passwords': 0,
         'repos_with_idor_low': 0,
         'repos_with_idor_high': 0,
-        'repos_with_anonymous_access': 0
+        'repos_with_anonymous_access': 0,
+        'repos_skipped_no_token': 0
     }
     
     try:
@@ -58,14 +59,25 @@ def analyze_csv(file_path):
                 if int(row['https_count']) > 0:
                     stats['repos_with_https'] += 1
                 
-                if row['password_vulnerability'].lower() == 'true':
-                    stats['repos_with_passwords'] += 1
+                # Check if authenticated analysis was skipped
+                password_val = row['password_vulnerability'].strip().lower()
+                idor_low_val = row['idor_tables_low'].strip().lower()
+                idor_high_val = row['idor_tables_high'].strip().lower()
+                integration_val = row['integration_count'].strip().lower()
                 
-                if int(row['idor_tables_low']) > 0:
-                    stats['repos_with_idor_low'] += 1
-                
-                if int(row['idor_tables_high']) > 0:
-                    stats['repos_with_idor_high'] += 1
+                if (password_val == 'skipped' or idor_low_val == 'skipped' or 
+                    idor_high_val == 'skipped' or integration_val == 'skipped'):
+                    stats['repos_skipped_no_token'] += 1
+                else:
+                    # Only count these if not skipped
+                    if password_val == 'true':
+                        stats['repos_with_passwords'] += 1
+                    
+                    if int(idor_low_val) > 0:
+                        stats['repos_with_idor_low'] += 1
+
+                    if int(idor_high_val) > 0:
+                        stats['repos_with_idor_high'] += 1
                 
                 if row['anonymous_access'].lower() == 'true':
                     stats['repos_with_anonymous_access'] += 1
@@ -80,6 +92,7 @@ def analyze_csv(file_path):
     # Print statistics
     print(f"📊 Total repositories: {stats['total_repos']}")
     print(f"🏗️  Base44 projects: {stats['base44_repos']}")
+    print(f"⚠️  Projects skipped (no token provided): {stats['repos_skipped_no_token']}")
     print(f"🔐 Repos with hard-coded secrets: {stats['repos_with_secrets']}")
     print(f"🌐 Repos with unsecure HTTP URLs: {stats['repos_with_http']}")
     print(f"🔒 Repos with unsecure HTTPS URLs (certificate issues): {stats['repos_with_https']}")

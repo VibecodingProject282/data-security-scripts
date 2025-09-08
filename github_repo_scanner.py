@@ -131,6 +131,9 @@ class GitHubRepoScanner:
                     elif detail.get('risk', '').upper() == 'LOW':
                         idor_low += 1
             
+            # Check if authenticated analysis was skipped
+            auth_skipped = findings.get('authenticated_analysis_skipped', False)
+            
             # Prepare CSV row data
             row_data = [
                 repo_info.get('clone_url', ''),  # URL
@@ -140,10 +143,10 @@ class GitHubRepoScanner:
                 len(findings.get('secrets_details', [])),  # secret_count
                 len(findings.get('http_details', [])),  # http_count
                 len(findings.get('https_details', [])),  # https_count
-                findings.get('password_vulnerabilities', False),  # password_vulnerability
-                idor_low,  # idor_tables_low
-                idor_high,  # idor_tables_high
-                len(findings.get('integrations_details', [])),  # integration_count
+                'skipped' if auth_skipped else findings.get('password_vulnerabilities', False),  # password_vulnerability
+                'skipped' if auth_skipped else idor_low,  # idor_tables_low
+                'skipped' if auth_skipped else idor_high,  # idor_tables_high
+                'skipped' if auth_skipped else len(findings.get('integrations_details', [])),  # integration_count
                 findings.get('anonymous_access_vulnerabilities', False),  # anonymous_access
                 len(findings.get('anonymous_access_details', []))  # anonymous_tables
             ]

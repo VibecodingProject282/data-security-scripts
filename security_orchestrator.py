@@ -55,7 +55,9 @@ class SecurityOrchestrator:
             'integrations_found': False,
             'integrations_details': [],
             'anonymous_access_vulnerabilities': False,
-            'anonymous_access_details': []
+            'anonymous_access_details': [],
+            'authenticated_analysis_skipped': False,
+            'authenticated_analysis_skip_reason': None
         }
         
     def run_base44_check(self) -> bool:
@@ -106,12 +108,18 @@ class SecurityOrchestrator:
         
         if not self.bearer_token and not has_anonymous_access:
             print("⚠️  Skipping authenticated analysis (no token + no anonymous access)")
+            self.findings['authenticated_analysis_skipped'] = True
+            self.findings['authenticated_analysis_skip_reason'] = "No bearer token provided and no anonymous access detected"
             return
 
         if not self.bearer_token and has_anonymous_access:
             print("🔍 Running authenticated analysis (anonymous access detected)")
             # Use a dummy token since the app allows anonymous access
             self.bearer_token = "dummy_token_for_anonymous_access"
+        
+        # Mark that authenticated analysis was performed
+        self.findings['authenticated_analysis_skipped'] = False
+        self.findings['authenticated_analysis_skip_reason'] = None
         
         # Password Storage Vulnerability Detection
         self._run_password_detection()
@@ -136,7 +144,7 @@ class SecurityOrchestrator:
                 self.findings['anonymous_access_details'] = detector.accessible_entities
                 
         except Exception as e:
-            pass  # Silently handle errors, details in JSON
+            pass  # Silently handle errors
 
     def _run_secret_detection(self):
         """Run secret detection"""
@@ -286,27 +294,32 @@ class SecurityOrchestrator:
             print(f"✅ Base44 Project: {self.findings['base44_project_id']}")
         else:
             print("❌ Base44 Project: Not detected")
+    
         
         print("\n📊 SECURITY FINDINGS:")
         print("-" * 25)
         
         # Secrets
         if self.findings['secrets_found']:
-            print(f"🚨 Secrets Found: {len(self.findings['secrets_details'])} issues")
+            print(f"🚨 Hard-coded Secrets Found: {len(self.findings['secrets_details'])} issues")
             for secret in self.findings['secrets_details'][:3]:  # Show first 3
                 file_path = secret.get('file', 'Unknown file')
                 secret_type = secret.get('type', 'Unknown type')
-                print(f"   • {secret_type} in {file_path}")
+                line_number = secret.get('line', 'Unknown line')
+                print(f"   • {secret_type} in {file_path} (line {line_number})")
             if len(self.findings['secrets_details']) > 3:
                 print(f"   ... and {len(self.findings['secrets_details']) - 3} more")
         else:
-            print("✅ Secrets: None found")
+            print("✅ Hard-coded secrets: None found")
         
         # HTTP URLs
         if self.findings['http_urls_found']:
             print(f"⚠️  HTTP URLs: {len(self.findings['http_details'])} found")
             for http in self.findings['http_details']:  # Show first 2
-                print(f"   • {http.get('url', 'Unknown URL')}")
+                url = http.get('url', 'Unknown URL')
+                file_path = http.get('file', 'Unknown file')
+                line_number = http.get('line', 'Unknown line')
+                print(f"   • {url} in {file_path} (line {line_number})")
         else:
             print("✅ HTTP URLs: None found")
         
@@ -316,30 +329,51 @@ class SecurityOrchestrator:
             for issue in self.findings['https_details']:
                 url = issue.get('url', 'Unknown URL')
                 detail = issue.get('detail', '')
-                print(f"   • {url} {('- ' + detail) if detail else ''}")
+                file_path = issue.get('file', 'Unknown file')
+                line_number = issue.get('line', 'Unknown line')
+                detail_text = f" - {detail}" if detail else ""
+                print(f"   • {url} in {file_path} (line {line_number}){detail_text}")
         else:
             print("✅ HTTPS Issues: None found")
         
         # Anonymous Access
         if self.findings['anonymous_access_vulnerabilities']:
-            print(f"🚨 Anonymous Access: {len(self.findings['anonymous_access_details'])} vulnerabilities")
+            table_names = ', '.join(self.findings['anonymous_access_details']) if self.findings['anonymous_access_details'] else 'unknown tables'
+            print(f"🚨 Anonymous Access: {table_names}")
         else:
             print("✅ Anonymous Access: Secure")
         
         # Password Vulnerabilities
-        if self.findings['password_vulnerabilities']:
-            print(f"🚨 Password Issues: {len(self.findings['password_details'])} tables affected")
+        if self.findings['authenticated_analysis_skipped']:
+            print("⚠️  Password Storage: Not checked - authenticated analysis skipped")
+        elif self.findings['password_vulnerabilities']:
+            table_names = ', '.join(self.findings['password_details']) if self.findings['password_details'] else 'unknown tables'
+            print(f"🚨 Password Issues: {table_names}")
         else:
             print("✅ Password Storage: Secure")
         
         # IDOR Vulnerabilities
-        if self.findings['idor_vulnerabilities']:
-            print(f"🚨 IDOR Issues: {len(self.findings['idor_details'])} potential vulnerabilities")
+        if self.findings['authenticated_analysis_skipped']:
+            print("⚠️  IDOR Protection: Not checked - authenticated analysis skipped")
+        elif self.findings['idor_vulnerabilities']:
+            # Group tables by risk level
+            high_risk_tables = [item['table'] for item in self.findings['idor_details'] if item.get('risk', '').upper() == 'HIGH']
+            low_risk_tables = [item['table'] for item in self.findings['idor_details'] if item.get('risk', '').upper() == 'LOW']
+            
+            print("🚨 IDOR Issues:")
+            if high_risk_tables:
+                print(f"   • HIGH: {', '.join(high_risk_tables)}")
+            if low_risk_tables:
+                print(f"   • LOW: {', '.join(low_risk_tables)}")
+            if not high_risk_tables and not low_risk_tables:
+                print("   • Unknown tables")
         else:
             print("✅ IDOR Protection: Secure")
         
         # Integrations
-        if self.findings['integrations_found']:
+        if self.findings['authenticated_analysis_skipped']:
+            print("⚠️  Integrations: Not checked - authenticated analysis skipped")
+        elif self.findings['integrations_found']:
             print(f"ℹ️  Integrations: {len(self.findings['integrations_details'])} found")
         else:
             print("ℹ️  Integrations: None found")
