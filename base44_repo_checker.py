@@ -41,12 +41,12 @@ class Base44Detector:
             'has_base44_logo': False,
             'has_base44_title': False
         }
-
         try:
-            with self.github_client.download_repo_as_zip(owner, repo) as repo_manager:
-                if not repo_manager:
-                    return {'error': 'Could not download repository'}
-
+            repo_manager = self.github_client.download_repo_as_zip(owner, repo)
+            if not repo_manager:
+                return {'error': 'Could not download repository'}
+                
+            with repo_manager:
                 # Helper to read file content safely
                 def get_file_content(filename):
                     try:
@@ -81,6 +81,7 @@ class Base44Detector:
                         self.project_id = None
                 else:
                     self.project_id = None
+
 
                 # 3. Check README.md
                 content = get_file_content("README.md")
@@ -122,7 +123,7 @@ class Base44Detector:
             
             # Calculate confidence (simple average of indicators)
             confidence = sum(indicators.values()) / len(indicators)
-            is_base44 = indicators['has_base44_client']
+            is_base44 = confidence >= 0.1 # At least one strong indicator
             
             return is_base44, confidence, indicators
             

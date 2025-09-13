@@ -262,10 +262,3 @@ python github_repo_scanner.py --search "react app" --limit 10 --token YOUR_BEARE
 ### For Base44-Specific Analysis:
 1. Ensure you have a valid bearer token for authenticated analysis
 2. Use Base44-specific detectors (`password_detector.py`, `idor_detector.py`, `get_integrations.py`)
-
-## Security Considerations
-
-- Always use secure authentication tokens
-- Be mindful of API rate limits when scanning multiple repositories
-- Review findings manually as automated tools may produce false positives
-- Store tokens securely and never commit them to version control

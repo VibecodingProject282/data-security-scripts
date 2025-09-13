@@ -57,7 +57,9 @@ class SecurityOrchestrator:
             'anonymous_access_vulnerabilities': False,
             'anonymous_access_details': [],
             'authenticated_analysis_skipped': False,
-            'authenticated_analysis_skip_reason': None
+            'authenticated_analysis_skip_reason': None,
+            'anonymous_access_skipped': False,
+            'anonymous_access_skip_reason': None
         }
         
     def run_base44_check(self) -> bool:
@@ -100,11 +102,15 @@ class SecurityOrchestrator:
 
     def run_authenticated_analysis(self):
         """Run analysis that requires Base44 authentication token"""
-        if not self.is_base44:
-            return
             
         # Check if we have a token or if anonymous access allows us to proceed
         has_anonymous_access = self.findings.get('anonymous_access_vulnerabilities', False)
+        
+        if self.project_id == None:
+            print("⚠️  Skipping authenticated analysis (no project ID)")
+            self.findings['authenticated_analysis_skipped'] = True
+            self.findings['authenticated_analysis_skip_reason'] = "No Base44 project ID detected"
+            return
         
         if not self.bearer_token and not has_anonymous_access:
             print("⚠️  Skipping authenticated analysis (no token + no anonymous access)")
@@ -132,7 +138,10 @@ class SecurityOrchestrator:
 
     def run_anonymous_access_check(self):
         """Run anonymous access vulnerability check"""
-        if not self.is_base44:
+        if self.project_id == None:
+            print("⚠️  Skipping anonymous access check (no project ID)")
+            self.findings['anonymous_access_skipped'] = True
+            self.findings['anonymous_access_skip_reason'] = "No Base44 project ID detected"
             return
 
         print("🔍 Running anonymous access check...")
@@ -291,9 +300,11 @@ class SecurityOrchestrator:
         
         # Base44 Detection
         if self.findings['base44_detected']:
-            print(f"✅ Base44 Project: {self.findings['base44_project_id']}")
+            project_id = self.findings['base44_project_id'] or 'Unknown'
+            print(f"✅ Base44 Project, Project ID: {project_id}")
         else:
             print("❌ Base44 Project: Not detected")
+            return  # No need to proceed if not Base44
     
         
         print("\n📊 SECURITY FINDINGS:")
@@ -337,7 +348,9 @@ class SecurityOrchestrator:
             print("✅ HTTPS Issues: None found")
         
         # Anonymous Access
-        if self.findings['anonymous_access_vulnerabilities']:
+        if self.findings['anonymous_access_skipped']:
+            print(f"⚠️  Anonymous Access: Not checked - {self.findings['anonymous_access_skip_reason']}")
+        elif self.findings['anonymous_access_vulnerabilities']:
             table_names = ', '.join(self.findings['anonymous_access_details']) if self.findings['anonymous_access_details'] else 'unknown tables'
             print(f"🚨 Anonymous Access: {table_names}")
         else:
@@ -345,7 +358,7 @@ class SecurityOrchestrator:
         
         # Password Vulnerabilities
         if self.findings['authenticated_analysis_skipped']:
-            print("⚠️  Password Storage: Not checked - authenticated analysis skipped")
+            print(f"⚠️  Password Storage: Not checked - {self.findings['authenticated_analysis_skip_reason']}")
         elif self.findings['password_vulnerabilities']:
             table_names = ', '.join(self.findings['password_details']) if self.findings['password_details'] else 'unknown tables'
             print(f"🚨 Password Issues: {table_names}")
@@ -354,7 +367,7 @@ class SecurityOrchestrator:
         
         # IDOR Vulnerabilities
         if self.findings['authenticated_analysis_skipped']:
-            print("⚠️  IDOR Protection: Not checked - authenticated analysis skipped")
+            print(f"⚠️  IDOR Protection: Not checked - {self.findings['authenticated_analysis_skip_reason']}")
         elif self.findings['idor_vulnerabilities']:
             # Group tables by risk level
             high_risk_tables = [item['table'] for item in self.findings['idor_details'] if item.get('risk', '').upper() == 'HIGH']
@@ -372,7 +385,7 @@ class SecurityOrchestrator:
         
         # Integrations
         if self.findings['authenticated_analysis_skipped']:
-            print("⚠️  Integrations: Not checked - authenticated analysis skipped")
+            print(f"⚠️  Integrations: Not checked - {self.findings['authenticated_analysis_skip_reason']}")
         elif self.findings['integrations_found']:
             print(f"ℹ️  Integrations: {len(self.findings['integrations_details'])} found")
         else:

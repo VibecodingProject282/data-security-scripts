@@ -35,7 +35,8 @@ def analyze_csv(file_path):
         'repos_with_idor_low': 0,
         'repos_with_idor_high': 0,
         'repos_with_anonymous_access': 0,
-        'repos_skipped_no_token': 0
+        'repos_skipped_no_token': 0,
+        'repos_skipped_no_project_id': 0
     }
     
     try:
@@ -48,6 +49,8 @@ def analyze_csv(file_path):
                 # Base44 projects
                 if row['is_base44'].lower() == 'true':
                     stats['base44_repos'] += 1
+                else:
+                    continue # not a Base44 project, skip further checks
                 
                 # Security findings
                 if int(row['secret_count']) > 0:
@@ -56,7 +59,7 @@ def analyze_csv(file_path):
                 if int(row['http_count']) > 0:
                     stats['repos_with_http'] += 1
                 
-                if int(row['https_count']) > 0:
+                if int(row['https_count']) > 1:
                     stats['repos_with_https'] += 1
                 
                 # Check if authenticated analysis was skipped
@@ -64,23 +67,26 @@ def analyze_csv(file_path):
                 idor_low_val = row['idor_tables_low'].strip().lower()
                 idor_high_val = row['idor_tables_high'].strip().lower()
                 integration_val = row['integration_count'].strip().lower()
-                
-                if (password_val == 'skipped' or idor_low_val == 'skipped' or 
-                    idor_high_val == 'skipped' or integration_val == 'skipped'):
-                    stats['repos_skipped_no_token'] += 1
-                else:
-                    # Only count these if not skipped
-                    if password_val == 'true':
-                        stats['repos_with_passwords'] += 1
-                    
-                    if int(idor_low_val) > 0:
-                        stats['repos_with_idor_low'] += 1
 
-                    if int(idor_high_val) > 0:
-                        stats['repos_with_idor_high'] += 1
-                
+                if row['is_base44'].lower() == 'true' and not row['project_id'].strip():
+                    stats['repos_skipped_no_project_id'] += 1
+                    continue # no project ID, skip further checks
+
                 if row['anonymous_access'].lower() == 'true':
                     stats['repos_with_anonymous_access'] += 1
+                elif row['anonymous_access'].lower() == 'false':
+                    stats['repos_skipped_no_token'] += 1
+                    continue # no token, skip further checks
+                    
+                # Only count these if not skipped
+                if password_val == 'true':
+                    stats['repos_with_passwords'] += 1
+                if int(idor_low_val) > 0:
+                    stats['repos_with_idor_low'] += 1
+                if int(idor_high_val) > 0:
+                    stats['repos_with_idor_high'] += 1
+                
+
     
     except FileNotFoundError:
         print(f"❌ File not found: {file_path}")
@@ -92,7 +98,6 @@ def analyze_csv(file_path):
     # Print statistics
     print(f"📊 Total repositories: {stats['total_repos']}")
     print(f"🏗️  Base44 projects: {stats['base44_repos']}")
-    print(f"⚠️  Projects skipped (no token provided): {stats['repos_skipped_no_token']}")
     print(f"🔐 Repos with hard-coded secrets: {stats['repos_with_secrets']}")
     print(f"🌐 Repos with unsecure HTTP URLs: {stats['repos_with_http']}")
     print(f"🔒 Repos with unsecure HTTPS URLs (certificate issues): {stats['repos_with_https']}")
@@ -100,6 +105,9 @@ def analyze_csv(file_path):
     print(f"⚠️  Repos with IDOR (low): {stats['repos_with_idor_low']}")
     print(f"🚨 Repos with IDOR (high): {stats['repos_with_idor_high']}")
     print(f"👤 Repos with anonymous access: {stats['repos_with_anonymous_access']}")
+
+    print(f"\n⚠️  Projects skipped (no token provided): {stats['repos_skipped_no_token']}")
+    print(f"⚠️  Projects skipped (no Base44 project ID found): {stats['repos_skipped_no_project_id']}")
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:

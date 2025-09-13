@@ -33,7 +33,7 @@ class GitHubRepoScanner:
     and performing comprehensive security analysis on each found repository.
     """
 
-    def __init__(self, search_query: str, limit: int = 5, bearer_token: Optional[str] = None):
+    def __init__(self, search_query: str, limit: int = 5, bearer_token: Optional[str] = None, search_code: bool = False):
         """
         Initialize GitHubRepoScanner
         
@@ -45,6 +45,7 @@ class GitHubRepoScanner:
         self.search_query = search_query
         self.limit = limit
         self.bearer_token = bearer_token
+        self.search_code = search_code
         self.github_client = GitHubClient()
         self.results = []
         self.results_folder = "repo-scanner-results"
@@ -132,21 +133,22 @@ class GitHubRepoScanner:
                         idor_low += 1
             
             # Check if authenticated analysis was skipped
+            anonymous_skipped = findings.get('anonymous_access_skipped', False)
             auth_skipped = findings.get('authenticated_analysis_skipped', False)
             
             # Prepare CSV row data
             row_data = [
-                repo_info.get('clone_url', ''),  # URL
+                repo_info.get('html_url', ''),  # URL
                 analysis_result.get('analysis_timestamp', ''),  # analysis_timestamp
                 findings.get('base44_detected', False),  # is_base44
                 findings.get('base44_project_id', ''),  # project_id (nullable)
                 len(findings.get('secrets_details', [])),  # secret_count
                 len(findings.get('http_details', [])),  # http_count
                 len(findings.get('https_details', [])),  # https_count
-                'skipped' if auth_skipped else findings.get('password_vulnerabilities', False),  # password_vulnerability
-                'skipped' if auth_skipped else idor_low,  # idor_tables_low
-                'skipped' if auth_skipped else idor_high,  # idor_tables_high
-                'skipped' if auth_skipped else len(findings.get('integrations_details', [])),  # integration_count
+                findings.get('password_vulnerabilities', False),  # password_vulnerability
+                idor_low,  # idor_tables_low
+                idor_high,  # idor_tables_high
+                len(findings.get('integrations_details', [])),  # integration_count
                 findings.get('anonymous_access_vulnerabilities', False),  # anonymous_access
                 len(findings.get('anonymous_access_details', []))  # anonymous_tables
             ]
@@ -182,7 +184,7 @@ class GitHubRepoScanner:
         
         # Prepare the search URL
         encoded_query = quote(self.search_query)
-        url = f"https://api.github.com/search/repositories"
+        url = f"https://api.github.com/search/repositories" if not self.search_code else "https://api.github.com/search/code"
         
         headers = {}
         if self.github_client.github_token:
@@ -237,36 +239,16 @@ class GitHubRepoScanner:
                 for repo in repositories:
                     if len(all_repositories) >= self.limit:
                         break
-                        
+                    
+                    full_name = repo['full_name'] if not self.search_code else repo['repository']['full_name']
+                    html_url = repo['html_url'] if not self.search_code else repo['repository']['html_url']
+
                     repo_info = {
-                        'name': repo['name'],
-                        'full_name': repo['full_name'],
-                        'html_url': repo['html_url'],
-                        'clone_url': repo['clone_url'],
-                        'description': repo.get('description', 'No description'),
-                        'stars': repo['stargazers_count'],
-                        'language': repo.get('language', 'Unknown'),
-                        'updated_at': repo['updated_at']
+                        'full_name': full_name,
+                        'html_url': html_url,
                     }
-                    all_repositories.append(repo_info)
-                
-                # print(f"✅ Found {len(repositories)} repositories on page {page}")
-                # print(f"📈 GitHub reports {total_count} total repositories match your search")
-                
-                # Check if we've reached the end of available results
-                # if len(repositories) < current_per_page:
-                #     print(f"✅ Reached end of available repositories. Total found: {len(all_repositories)}")
-                #     break
-                
-                # # GitHub API search has a limit of 1000 results total (10 pages of 100)
-                # if page >= 10:
-                #     print(f"⚠️  Reached GitHub API search limit (1000 results max). Total found: {len(all_repositories)}")
-                #     break
-                
+                    all_repositories.append(repo_info)    
                 page += 1
-                
-                # Add a small delay to avoid hitting rate limits too quickly
-                # time.sleep(0.5)
             
             if len(all_repositories) == 0:
                 print("❌ No repositories found matching your search criteria.")
@@ -451,6 +433,7 @@ def main():
     parser.add_argument('--search', required=True, help='Search term for finding GitHub repositories')
     parser.add_argument('--limit', type=int, default=5, help='Maximum number of repositories to analyze (default: 5)')
     parser.add_argument('--token', help='Bearer token for authenticated analysis (optional)')
+    parser.add_argument('--code', type=bool, default=False, help='Searching in code instead of repos (default: False)')
     
     args = parser.parse_args()
     
@@ -470,7 +453,7 @@ def main():
     print(f"🔍 Scanning GitHub repositories for '{args.search}' (limit: {args.limit})")
     
     # Create scanner and run analysis
-    scanner = GitHubRepoScanner(search_query=args.search, limit=args.limit, bearer_token=args.token)
+    scanner = GitHubRepoScanner(search_query=args.search, limit=args.limit, bearer_token=args.token, search_code=args.code)
 
     try:
         results = scanner.run_analysis()
