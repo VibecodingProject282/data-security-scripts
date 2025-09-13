@@ -28,22 +28,24 @@ class HTTPDetector:
     def __init__(self, timeout: int = 30):
         self.github_client = GitHubClient(timeout)
         self.http_issues = []
+        self.found_urls = set()  # Track URLs to avoid duplicates
     
     def detect_http_urls(self, content: str, file_path: str) -> List[Dict]:
         """Detect HTTP URLs in content"""
         http_issues = []
-        found_urls = set()  # Track URLs to avoid duplicates
+        
         
         # HTTP-specific URL patterns
         http_patterns = [
+            r'(http://(?:[-\w.]+)(?::\d+)?)',
             # Standard HTTP URLs
-            r'(http://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?)',
-            # HTTP URLs in quotes or strings
-            r'["\']((http://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?))["\']',
-            # HTTP URLs in configurations
-            r'(?:url|endpoint|base_url|api_url|host)\s*[:=]\s*["\']?(http://[^"\'\s<>]+)["\']?',
-            # HTTP URLs in comments or documentation
-            r'(?://|#|\*)\s*.*?(http://[^\s<>"\']+)',
+            # r'(http://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?)',
+            # # HTTP URLs in quotes or strings
+            # r'["\']((http://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?))["\']',
+            # # HTTP URLs in configurations
+            # r'(?:url|endpoint|base_url|api_url|host)\s*[:=]\s*["\']?(http://[^"\'\s<>]+)["\']?',
+            # # HTTP URLs in comments or documentation
+            # r'(?://|#|\*)\s*.*?(http://[^\s<>"\']+)',
         ]
         
         for pattern in http_patterns:
@@ -56,9 +58,9 @@ class HTTPDetector:
                 url = url.strip('\'"')
                 
                 # Skip if we've already processed this URL
-                if url in found_urls:
+                if url in self.found_urls or 'localhost' in url or '127.0.0.1' in url:
                     continue
-                found_urls.add(url)
+                self.found_urls.add(url)
                 line_number = content[:match.start()].count('\n') + 1
                 
                 # Create HTTP security issue
@@ -153,7 +155,6 @@ class HTTPDetector:
                     for issue in by_severity[severity]:
                         print(f"  📄 {issue['file']} (line {issue['line']})")
                         print(f"     URL: {issue['url']}")
-                        print(f"     Recommendation: {issue['recommendation']}")
 
 
 def main():

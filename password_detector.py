@@ -50,7 +50,6 @@ class PasswordDetector:
         """Check if there are columns containing 'password' in their names"""
         for column_name in columns_names:
             if "password" in column_name.lower():
-                print(f"🚨 Found password column: '{column_name}'")
                 return True
         return False
 

@@ -313,13 +313,12 @@ class SecurityOrchestrator:
         # Secrets
         if self.findings['secrets_found']:
             print(f"🚨 Hard-coded Secrets Found: {len(self.findings['secrets_details'])} issues")
-            for secret in self.findings['secrets_details'][:3]:  # Show first 3
+            for secret in self.findings['secrets_details']:  # Show all
                 file_path = secret.get('file', 'Unknown file')
                 secret_type = secret.get('type', 'Unknown type')
                 line_number = secret.get('line', 'Unknown line')
-                print(f"   • {secret_type} in {file_path} (line {line_number})")
-            if len(self.findings['secrets_details']) > 3:
-                print(f"   ... and {len(self.findings['secrets_details']) - 3} more")
+                secret_value = secret.get('value', '*****')
+                print(f"   • {secret_type} in {file_path} (line {line_number}): {secret_value}")
         else:
             print("✅ Hard-coded secrets: None found")
         
@@ -352,7 +351,7 @@ class SecurityOrchestrator:
             print(f"⚠️  Anonymous Access: Not checked - {self.findings['anonymous_access_skip_reason']}")
         elif self.findings['anonymous_access_vulnerabilities']:
             table_names = ', '.join(self.findings['anonymous_access_details']) if self.findings['anonymous_access_details'] else 'unknown tables'
-            print(f"🚨 Anonymous Access: {table_names}")
+            print(f"🚨 Anonymous Access To Tables: {table_names}")
         else:
             print("✅ Anonymous Access: Secure")
         
@@ -361,7 +360,7 @@ class SecurityOrchestrator:
             print(f"⚠️  Password Storage: Not checked - {self.findings['authenticated_analysis_skip_reason']}")
         elif self.findings['password_vulnerabilities']:
             table_names = ', '.join(self.findings['password_details']) if self.findings['password_details'] else 'unknown tables'
-            print(f"🚨 Password Issues: {table_names}")
+            print(f"🚨 Password Issues in Tables: {table_names}")
         else:
             print("✅ Password Storage: Secure")
         

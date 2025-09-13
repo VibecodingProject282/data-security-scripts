@@ -84,7 +84,7 @@ class SecretDetector:
                 line_number = content[:match.start()].count('\n') + 1
                 secrets.append({
                     'type': 'Environment Variable',
-                    'value': f"{var_name} = {var_value[:20]}..." if len(var_value) > 20 else f"{var_name} = {var_value}",
+                    'value': f"{var_value[:20]}..." if len(var_value) > 20 else var_value,
                     'line': line_number,
                     'pattern': pattern,
                     'context': get_line_context(content, line_number)

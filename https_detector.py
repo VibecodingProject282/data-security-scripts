@@ -32,22 +32,24 @@ class HTTPSDetector:
         self.github_client = GitHubClient(timeout)
         self.https_issues = []
         self.timeout = timeout
+        self.found_urls = set()  # Track URLs to avoid duplicates
     
     def detect_https_urls(self, content: str, file_path: str) -> List[Dict]:
         """Detect HTTPS URLs in content"""
         https_issues = []
-        found_urls = set()  # Track URLs to avoid duplicates
+        
         
         # HTTPS-specific URL patterns
         https_patterns = [
+            r'(https://(?:[-\w.]+)(?::\d+)?)',
             # Standard HTTPS URLs
-            r'(https://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?)',
+            # r'(https://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?)',
             # HTTPS URLs in quotes or strings
-            r'["\']((https://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?))["\']',
-            # HTTPS URLs in configurations
-            r'(?:url|endpoint|base_url|api_url|host)\s*[:=]\s*["\']?(https://[^"\'\s<>]+)["\']?',
-            # HTTPS URLs in comments or documentation
-            r'(?://|#|\*)\s*.*?(https://[^\s<>"\']+)',
+            # r'["\']((https://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*)?(?:\?(?:[\w&=%.])*)?(?:#(?:[\w.])*)?))["\']',
+            # # HTTPS URLs in configurations
+            # r'(?:url|endpoint|base_url|api_url|host)\s*[:=]\s*["\']?(https://[^"\'\s<>]+)["\']?',
+            # # HTTPS URLs in comments or documentation
+            # r'(?://|#|\*)\s*.*?(https://[^\s<>"\']+)',
         ]
         
         for pattern in https_patterns:
@@ -60,9 +62,9 @@ class HTTPSDetector:
                 url = url.strip('\'"')
                 
                 # Skip if we've already processed this URL
-                if url in found_urls:
+                if url in self.found_urls or 'localhost' in url or '127.0.0.1' in url:
                     continue
-                found_urls.add(url)
+                self.found_urls.add(url)
                 line_number = content[:match.start()].count('\n') + 1
                 
                 # Analyze HTTPS URL and its SSL certificate
@@ -107,15 +109,6 @@ class HTTPSDetector:
                     'CRITICAL',
                     f'SSL certificate expired on {ssl_result["expiry_date"]}',
                     'Update the SSL certificate immediately'
-                ))
-            
-            if ssl_result.get('expires_soon'):
-                issues.append(self.create_ssl_issue(
-                    url, line_number, file_path, content,
-                    'SSL Certificate Expires Soon',
-                    'HIGH',
-                    f'SSL certificate expires on {ssl_result["expiry_date"]}',
-                    'Plan certificate renewal to avoid service disruption'
                 ))
             
             if ssl_result.get('weak_cipher'):
